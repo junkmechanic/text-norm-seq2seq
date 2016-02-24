@@ -13,7 +13,9 @@ _PAD = "_PAD"
 _GO = "_GO"
 _EOS = "_EOS"
 _UNK = "_UNK"
-_START_VOCAB = [_PAD, _GO, _EOS, _UNK]
+_CPADS = '_CPADS'
+_CPADE = '_CPADE'
+_START_VOCAB = [_PAD, _GO, _EOS, _UNK, _CPADS, _CPADE]
 
 PAD_ID = 0
 GO_ID = 1
@@ -21,8 +23,20 @@ EOS_ID = 2
 UNK_ID = 3
 
 
+def build_aspell():
+    lexicon = []
+    with open('./data/aspell.dict') as dfile:
+        for line in dfile:
+            lexicon.append(line.strip().lower())
+    return lexicon
+aspell = build_aspell()
+
+
 def get_training_data(data_dir):
-    training_files = ['train_data.json', 'clear_tweets.json']
+    training_files = [
+        'train_data.json',
+        'clear_tweets.json'
+    ]
 
     all_samples = []
     for jfile in training_files:
@@ -44,6 +58,17 @@ def valid_token(token):
         elif not token.isalnum():
             return False
         return True
+
+
+def context_window(l, ngram):
+    assert (ngram % 2) == 1
+    assert ngram >= 1
+
+    lpadded = ngram // 2 * [_CPADS] + l + ngram // 2 * [_CPADE]
+    windows = [lpadded[i:(i + ngram)] for i in range(len(l))]
+
+    assert len(windows) == len(l)
+    return windows
 
 
 def prepare_train_files(data_dir, train_portion=0.9, reuse=True):
@@ -74,21 +99,27 @@ def prepare_train_files(data_dir, train_portion=0.9, reuse=True):
     # Training Set
     for sample, n in zip(samples, range(num_train_samples)):
         for inp, out in zip(sample['input'], sample['output']):
+            inp, out = inp.lower(), out.lower()
             if not valid_token(inp):
                 continue
+            # if inp in aspell:
+            #     continue
 
-            writeToFile(en_train, ' '.join(list(inp.lower())) + '\n')
-            writeToFile(fr_train, ' '.join(list(out.lower().replace(' ', '_')))
+            writeToFile(en_train, ' '.join(list(inp)) + '\n')
+            writeToFile(fr_train, ' '.join(list(out.replace(' ', '_')))
                         + '\n')
 
     # Dev Set
     for sample in samples[num_train_samples:]:
         for inp, out in zip(sample['input'], sample['output']):
+            inp, out = inp.lower(), out.lower()
             if not valid_token(inp):
                 continue
+            # if inp in aspell:
+            #     continue
 
-            writeToFile(en_dev, ' '.join(list(inp.lower())) + '\n')
-            writeToFile(fr_dev, ' '.join(list(out.lower().replace(' ', '_')))
+            writeToFile(en_dev, ' '.join(list(inp)) + '\n')
+            writeToFile(fr_dev, ' '.join(list(out.replace(' ', '_')))
                         + '\n')
 
     # Test Set
@@ -97,11 +128,14 @@ def prepare_train_files(data_dir, train_portion=0.9, reuse=True):
 
     for sample in samples:
         for inp, out in zip(sample['input'], sample['output']):
+            inp, out = inp.lower(), out.lower()
             if not valid_token(inp):
                 continue
+            # if inp in aspell:
+            #     continue
 
-            writeToFile(en_test, ' '.join(list(inp.lower())) + '\n')
-            writeToFile(fr_test, ' '.join(list(out.lower().replace(' ', '_')))
+            writeToFile(en_test, ' '.join(list(inp)) + '\n')
+            writeToFile(fr_test, ' '.join(list(out.replace(' ', '_')))
                         + '\n')
 
     return (os.path.join(data_dir, 'train'), os.path.join(data_dir, 'dev'),
@@ -154,29 +188,29 @@ def data_to_token_ids(data_path, target_path, vocab_path, reuse=True):
                                   + "\n")
 
 
-def prepare_data(data_dir):
+def prepare_data(data_dir, reuse=False):
 
-    train_path, dev_path, test_path = prepare_train_files(data_dir, reuse=False)
+    train_path, dev_path, test_path = prepare_train_files(data_dir, reuse)
 
     fr_vocab_path = os.path.join(data_dir, "vocab.fr")
     en_vocab_path = os.path.join(data_dir, "vocab.en")
-    create_vocabulary(fr_vocab_path, train_path + ".fr", reuse=False)
-    create_vocabulary(en_vocab_path, train_path + ".en", reuse=False)
+    create_vocabulary(fr_vocab_path, train_path + ".fr", reuse)
+    create_vocabulary(en_vocab_path, train_path + ".en", reuse)
 
     fr_train_ids_path = train_path + ".ids.fr"
     en_train_ids_path = train_path + ".ids.en"
-    data_to_token_ids(train_path + ".fr", fr_train_ids_path, fr_vocab_path, reuse=False)
-    data_to_token_ids(train_path + ".en", en_train_ids_path, en_vocab_path, reuse=False)
+    data_to_token_ids(train_path + ".fr", fr_train_ids_path, fr_vocab_path, reuse)
+    data_to_token_ids(train_path + ".en", en_train_ids_path, en_vocab_path, reuse)
 
     fr_dev_ids_path = dev_path + ".ids.fr"
     en_dev_ids_path = dev_path + ".ids.en"
-    data_to_token_ids(dev_path + ".fr", fr_dev_ids_path, fr_vocab_path, reuse=False)
-    data_to_token_ids(dev_path + ".en", en_dev_ids_path, en_vocab_path, reuse=False)
+    data_to_token_ids(dev_path + ".fr", fr_dev_ids_path, fr_vocab_path, reuse)
+    data_to_token_ids(dev_path + ".en", en_dev_ids_path, en_vocab_path, reuse)
 
     fr_test_ids_path = test_path + ".ids.fr"
     en_test_ids_path = test_path + ".ids.en"
-    data_to_token_ids(test_path + ".fr", fr_test_ids_path, fr_vocab_path, reuse=False)
-    data_to_token_ids(test_path + ".en", en_test_ids_path, en_vocab_path, reuse=False)
+    data_to_token_ids(test_path + ".fr", fr_test_ids_path, fr_vocab_path, reuse)
+    data_to_token_ids(test_path + ".en", en_test_ids_path, en_vocab_path, reuse)
 
     return (en_train_ids_path, fr_train_ids_path,
             en_dev_ids_path, fr_dev_ids_path,

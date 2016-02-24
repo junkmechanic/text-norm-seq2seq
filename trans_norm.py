@@ -36,6 +36,7 @@ import os
 import sys
 import time
 import json
+import itertools
 
 import numpy as np
 from six.moves import xrange  # pylint: disable=redefined-builtin
@@ -56,8 +57,8 @@ tf.app.flags.DEFINE_integer("batch_size", 64,
                             "Batch size to use during training.")
 tf.app.flags.DEFINE_integer("size", 1024, "Size of each model layer.")
 tf.app.flags.DEFINE_integer("num_layers", 3, "Number of layers in the model.")
-tf.app.flags.DEFINE_integer("en_vocab_size", 40, "English vocabulary size.")
-tf.app.flags.DEFINE_integer("fr_vocab_size", 42, "French vocabulary size.")
+tf.app.flags.DEFINE_integer("en_vocab_size", 42, "English vocabulary size.")
+tf.app.flags.DEFINE_integer("fr_vocab_size", 44, "French vocabulary size.")
 tf.app.flags.DEFINE_string("data_dir", "./data", "Data directory")
 tf.app.flags.DEFINE_string("train_dir", "./train", "Training directory.")
 tf.app.flags.DEFINE_integer("max_train_data_size", 0,
@@ -134,8 +135,9 @@ def create_model(session, forward_only):
 
 def train():
   print("Preparing data in %s" % FLAGS.data_dir)
+  # change the reuse parameter if you want to build the data again
   en_train, fr_train, en_dev, fr_dev, en_test, fr_test, _, _ = \
-      data_utils.prepare_data(FLAGS.data_dir)
+      data_utils.prepare_data(FLAGS.data_dir, reuse=False)
 
   with tf.Session() as sess:
     # Create model.
@@ -267,23 +269,34 @@ def eval_test():
   test_out = os.path.join(FLAGS.data_dir, 'test_errors.out')
   deleteFiles([test_out])
   stats = {'R2W': 0, 'W2R': 0, 'W2W_C': 0, 'W2W_NC': 0}
-  _, _, _, _, en_test, fr_test, _, _ = data_utils.prepare_data(FLAGS.data_dir)
+  # change the reuse parameter if you want to build the data again
+  _, _, _, _, en_test, fr_test, _, _ = data_utils.prepare_data(FLAGS.data_dir,
+                                                               reuse=False)
   with tf.Session() as sess:
     model = create_model(sess, True)
     test_set = read_data(en_test, fr_test)
+    test_bucket_sizes = [len(test_set[b]) for b in range(len(_buckets))]
+    print('Bucket Sizes : {}'.format(test_bucket_sizes))
     total_loss, num_batches = 0, 0
+
     for bucket_id in range(len(_buckets)):
-      for encoder_inputs, decoder_inputs, target_weights, batch_size in \
-          model.get_all_batches(test_set, bucket_id):
+      all_batches = ([u for u in k if u is not None] for k in
+                     itertools.izip_longest(
+                       *[test_set[bucket_id][i::FLAGS.batch_size]
+                         for i in range(FLAGS.batch_size)]
+                     ))
+      for batch in all_batches:
+        encoder_inputs, decoder_inputs, target_weights = model.prepare_batch(
+          batch, bucket_id)
         # setting the model batch size in case it is smaller (would be for the
         # last batch in the bucket)
-        model.batch_size = batch_size
+        model.batch_size = len(batch)
         _, eval_loss, logits = model.step(sess, encoder_inputs, decoder_inputs,
                                           target_weights, bucket_id, True)
         outputs = np.argmax(logits, axis=2).transpose()
         outseq = [out[:list(out).index(data_utils.EOS_ID)] for out in outputs
                   if data_utils.EOS_ID in out]
-        stat_updates = update_error_counts(test_set[bucket_id], outseq)
+        stat_updates = update_error_counts(batch, outseq)
         stats = {k: stats[k] + v for k, v in stat_updates.items()}
         total_loss += math.exp(eval_loss)
         num_batches += 1

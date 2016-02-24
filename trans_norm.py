@@ -73,6 +73,10 @@ tf.app.flags.DEFINE_integer("patience", 20, "Patience")
 
 FLAGS = tf.app.flags.FLAGS
 
+# Limit (hard) the amount of GPU memory to be used by a process during a
+# session
+gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=-0.4)
+
 # We use a number of buckets and pad to the closest one for efficiency.
 # See seq2seq_model.Seq2SeqModel for details of how they work.
 _buckets = [(5, 10), (10, 15), (20, 25), (40, 50)]
@@ -139,7 +143,7 @@ def train():
   en_train, fr_train, en_dev, fr_dev, en_test, fr_test, _, _ = \
       data_utils.prepare_data(FLAGS.data_dir, reuse=False)
 
-  with tf.Session() as sess:
+  with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
     # Create model.
     print("Creating %d layers of %d units." % (FLAGS.num_layers, FLAGS.size))
     model = create_model(sess, False)
@@ -272,7 +276,7 @@ def eval_test():
   # change the reuse parameter if you want to build the data again
   _, _, _, _, en_test, fr_test, _, _ = data_utils.prepare_data(FLAGS.data_dir,
                                                                reuse=False)
-  with tf.Session() as sess:
+  with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
     model = create_model(sess, True)
     test_set = read_data(en_test, fr_test)
     test_bucket_sizes = [len(test_set[b]) for b in range(len(_buckets))]
@@ -307,7 +311,7 @@ def eval_test():
 
 
 def decode(in_file, with_labels=True):
-  with tf.Session() as sess:
+  with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
     # Create model and load parameters.
     model = create_model(sess, True)
     model.batch_size = 1  # We decode one sentence at a time.

@@ -35,7 +35,7 @@ aspell = build_aspell()
 def get_training_data(data_dir):
     training_files = [
         'train_data.json',
-        'clear_tweets.json'
+        # 'clear_tweets.json'
     ]
 
     all_samples = []
@@ -102,8 +102,8 @@ def prepare_train_files(data_dir, train_portion=0.9, reuse=True):
             inp, out = inp.lower(), out.lower()
             if not valid_token(inp):
                 continue
-            # if inp in aspell:
-            #     continue
+            if inp in aspell:
+                continue
 
             writeToFile(en_train, ' '.join(list(inp)) + '\n')
             writeToFile(fr_train, ' '.join(list(out.replace(' ', '_')))
@@ -115,8 +115,8 @@ def prepare_train_files(data_dir, train_portion=0.9, reuse=True):
             inp, out = inp.lower(), out.lower()
             if not valid_token(inp):
                 continue
-            # if inp in aspell:
-            #     continue
+            if inp in aspell:
+                continue
 
             writeToFile(en_dev, ' '.join(list(inp)) + '\n')
             writeToFile(fr_dev, ' '.join(list(out.replace(' ', '_')))
@@ -131,8 +131,8 @@ def prepare_train_files(data_dir, train_portion=0.9, reuse=True):
             inp, out = inp.lower(), out.lower()
             if not valid_token(inp):
                 continue
-            # if inp in aspell:
-            #     continue
+            if inp in aspell:
+                continue
 
             writeToFile(en_test, ' '.join(list(inp)) + '\n')
             writeToFile(fr_test, ' '.join(list(out.replace(' ', '_')))

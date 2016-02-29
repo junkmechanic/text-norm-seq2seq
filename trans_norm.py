@@ -70,12 +70,14 @@ tf.app.flags.DEFINE_boolean("decode", False,
 tf.app.flags.DEFINE_boolean("self_test", False,
                             "Run a self-test if this is set to True.")
 tf.app.flags.DEFINE_integer("patience", 20, "Patience")
+tf.app.flags.DEFINE_boolean("reuse", False, "Reuse prepared data")
 
 FLAGS = tf.app.flags.FLAGS
 
 # Limit (hard) the amount of GPU memory to be used by a process during a
 # session
-gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=-0.4)
+config_all = tf.ConfigProto()
+# config_all.gpu_options.per_process_gpu_memory_fraction=0.5
 
 # We use a number of buckets and pad to the closest one for efficiency.
 # See seq2seq_model.Seq2SeqModel for details of how they work.
@@ -141,9 +143,9 @@ def train():
   print("Preparing data in %s" % FLAGS.data_dir)
   # change the reuse parameter if you want to build the data again
   en_train, fr_train, en_dev, fr_dev, en_test, fr_test, _, _ = \
-      data_utils.prepare_data(FLAGS.data_dir, reuse=False)
+      data_utils.prepare_data(FLAGS.data_dir, reuse=FLAGS.reuse)
 
-  with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
+  with tf.Session(config=config_all) as sess:
     # Create model.
     print("Creating %d layers of %d units." % (FLAGS.num_layers, FLAGS.size))
     model = create_model(sess, False)
@@ -215,7 +217,7 @@ def train():
                                        target_weights, bucket_id, True)
           eval_ppx = math.exp(eval_loss) if eval_loss < 300 else float('inf')
           print("  test eval: bucket %d perplexity %.2f" % (bucket_id, eval_ppx))
-        for bucket_id in xrange(len(_buckets) - 1):
+        for bucket_id in xrange(len(_buckets)):
           encoder_inputs, decoder_inputs, target_weights = model.get_batch(
               dev_set, bucket_id)
           _, eval_loss, _ = model.step(sess, encoder_inputs, decoder_inputs,
@@ -275,8 +277,8 @@ def eval_test():
   stats = {'R2W': 0, 'W2R': 0, 'W2W_C': 0, 'W2W_NC': 0}
   # change the reuse parameter if you want to build the data again
   _, _, _, _, en_test, fr_test, _, _ = data_utils.prepare_data(FLAGS.data_dir,
-                                                               reuse=False)
-  with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
+                                                               reuse=FLAGS.reuse)
+  with tf.Session(config=config_all) as sess:
     model = create_model(sess, True)
     test_set = read_data(en_test, fr_test)
     test_bucket_sizes = [len(test_set[b]) for b in range(len(_buckets))]
@@ -287,8 +289,7 @@ def eval_test():
       all_batches = ([u for u in k if u is not None] for k in
                      itertools.izip_longest(
                        *[test_set[bucket_id][i::FLAGS.batch_size]
-                         for i in range(FLAGS.batch_size)]
-                     ))
+                         for i in range(FLAGS.batch_size)]))
       for batch in all_batches:
         encoder_inputs, decoder_inputs, target_weights = model.prepare_batch(
           batch, bucket_id)
@@ -308,10 +309,16 @@ def eval_test():
         model.batch_size = FLAGS.batch_size
     print("Loss over the test set : {}".format(total_loss / num_batches))
     print(stats)
+    precision = stats['W2R'] / sum([stats['W2R'], stats['R2W'],
+                                    stats['W2W_C']])
+    recall = stats['W2R'] / sum([stats['W2R'], stats['W2W_NC'],
+                                 stats['W2W_C']])
+    f_m = (2 * precision * recall) / (precision + recall)
+    print('P: {}\nR: {}\nF: {}'.format(precision, recall, f_m))
 
 
 def decode(in_file, with_labels=True):
-  with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
+  with tf.Session(config=config_all) as sess:
     # Create model and load parameters.
     model = create_model(sess, True)
     model.batch_size = 1  # We decode one sentence at a time.

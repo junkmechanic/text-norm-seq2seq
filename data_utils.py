@@ -15,7 +15,8 @@ _EOS = "_EOS"
 _UNK = "_UNK"
 _CPADS = '_CPADS'
 _CPADE = '_CPADE'
-_START_VOCAB = [_PAD, _GO, _EOS, _UNK, _CPADS, _CPADE]
+_SEP = '_S_'
+_START_VOCAB = [_PAD, _GO, _EOS]
 
 PAD_ID = 0
 GO_ID = 1
@@ -71,7 +72,21 @@ def context_window(l, ngram):
     return windows
 
 
-def prepare_train_files(data_dir, train_portion=0.9, reuse=True):
+def convert_format(window):
+    spaced = []
+    for token in window:
+        if token ==  _CPADS:
+            spaced.append(_CPADS)
+        elif token == _CPADE:
+            spaced.append(_CPADE)
+        elif not valid_token(token.lower()):
+            spaced.append(_UNK)
+        else:
+            spaced.append(' '.join(list(token.lower())))
+    return spaced
+
+
+def prepare_train_files(data_dir, train_portion=0.9, reuse=False):
 
     en_train = os.path.join(data_dir, 'train.en')
     fr_train = os.path.join(data_dir, 'train.fr')
@@ -87,38 +102,39 @@ def prepare_train_files(data_dir, train_portion=0.9, reuse=True):
         return (os.path.join(data_dir, 'train'), os.path.join(data_dir, 'dev'),
                 os.path.join(data_dir, 'test'))
 
-    # with open(os.path.join(data_dir, 'train_data.json')) as ifi:
-    #     samples = json.load(ifi)
-
     samples = get_training_data(data_dir)
 
     deleteFiles([en_train, fr_train, en_dev, fr_dev, en_test, fr_test])
 
+    ngram = 3
     num_samples = len(samples)
     num_train_samples = int(numpy.round(num_samples * train_portion))
+    sep = ' {} '.format(_SEP)
     # Training Set
     for sample, n in zip(samples, range(num_train_samples)):
-        for inp, out in zip(sample['input'], sample['output']):
-            inp, out = inp.lower(), out.lower()
+        for in_win, out in zip(context_window(sample['input'], ngram),
+                               sample['output']):
+            inp, out = in_win[ngram // 2].lower(), out.lower()
             if not valid_token(inp):
                 continue
             if inp in aspell:
                 continue
 
-            writeToFile(en_train, ' '.join(list(inp)) + '\n')
+            writeToFile(en_train, sep.join(convert_format(in_win)) + '\n')
             writeToFile(fr_train, ' '.join(list(out.replace(' ', '_')))
                         + '\n')
 
     # Dev Set
     for sample in samples[num_train_samples:]:
-        for inp, out in zip(sample['input'], sample['output']):
-            inp, out = inp.lower(), out.lower()
+        for in_win, out in zip(context_window(sample['input'], ngram),
+                               sample['output']):
+            inp, out = in_win[ngram // 2].lower(), out.lower()
             if not valid_token(inp):
                 continue
             if inp in aspell:
                 continue
 
-            writeToFile(en_dev, ' '.join(list(inp)) + '\n')
+            writeToFile(en_dev, sep.join(convert_format(in_win)) + '\n')
             writeToFile(fr_dev, ' '.join(list(out.replace(' ', '_')))
                         + '\n')
 
@@ -127,14 +143,15 @@ def prepare_train_files(data_dir, train_portion=0.9, reuse=True):
         samples = json.load(ifi)
 
     for sample in samples:
-        for inp, out in zip(sample['input'], sample['output']):
-            inp, out = inp.lower(), out.lower()
+        for in_win, out in zip(context_window(sample['input'], ngram),
+                               sample['output']):
+            inp, out = in_win[ngram // 2].lower(), out.lower()
             if not valid_token(inp):
                 continue
             if inp in aspell:
                 continue
 
-            writeToFile(en_test, ' '.join(list(inp)) + '\n')
+            writeToFile(en_test, sep.join(convert_format(in_win)) + '\n')
             writeToFile(fr_test, ' '.join(list(out.replace(' ', '_')))
                         + '\n')
 

@@ -142,7 +142,7 @@ def prepare_train_files(data_dir, train_portion=0.9, reuse=True):
             os.path.join(data_dir, 'test'))
 
 
-def create_vocabulary(vocab_path, data_path, reuse=True):
+def create_vocabulary(vocab_path, data_path, reuse=False):
     if reuse and os.path.exists(vocab_path):
         return
     deleteFiles([vocab_path])
@@ -175,7 +175,7 @@ def sentence_to_token_ids(sentence, vocabulary):
     return [vocabulary.get(w) for w in tokens]
 
 
-def data_to_token_ids(data_path, target_path, vocab_path, reuse=True):
+def data_to_token_ids(data_path, target_path, vocab_path, reuse=False):
     if reuse and os.path.exists(target_path):
         return
     deleteFiles([target_path])
@@ -190,7 +190,8 @@ def data_to_token_ids(data_path, target_path, vocab_path, reuse=True):
 
 def prepare_data(data_dir, reuse=False):
 
-    train_path, dev_path, test_path = prepare_train_files(data_dir, reuse)
+    train_path, dev_path, test_path = prepare_train_files(data_dir,
+                                                          reuse=reuse)
 
     fr_vocab_path = os.path.join(data_dir, "vocab.fr")
     en_vocab_path = os.path.join(data_dir, "vocab.en")
@@ -216,6 +217,3 @@ def prepare_data(data_dir, reuse=False):
             en_dev_ids_path, fr_dev_ids_path,
             en_test_ids_path, fr_test_ids_path,
             en_vocab_path, fr_vocab_path)
-
-
-# TODO: include indicator for whether the word is in aspell or not.

@@ -35,7 +35,6 @@ import math
 import os
 import sys
 import time
-import json
 import itertools
 
 import numpy as np

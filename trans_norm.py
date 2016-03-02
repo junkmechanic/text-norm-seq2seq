@@ -250,7 +250,9 @@ def update_error_counts(in_seqs, out_seqs):
   stats = {'R2W': 0, 'W2R': 0, 'W2W_C': 0, 'W2W_NC': 0}
 
   for in_seq, out_seq in zip(in_seqs, out_seqs):
-    inp = ''.join([rev_en_vocab[i] for i in in_seq[0]]).replace('_', ' ')
+    # inp = ''.join([rev_en_vocab[i] for i in in_seq[0]]).replace('_', ' ')
+    inp = ''.join([rev_en_vocab[i] for i in in_seq[0]])
+    inp = inp.split('_S_')[1]
     norm = ''.join([rev_fr_vocab[i] for i in in_seq[1][:-1]]).replace('_', ' ')
     out = ''.join([rev_fr_vocab[i] for i in out_seq]).replace('_', ' ')
 

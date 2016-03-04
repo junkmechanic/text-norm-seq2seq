@@ -36,7 +36,7 @@ aspell = build_aspell()
 def get_training_data(data_dir):
     training_files = [
         'train_data.json',
-        # 'clear_tweets.json'
+        'clear_tweets.json'
     ]
 
     all_samples = []
@@ -75,7 +75,7 @@ def context_window(l, ngram):
 def convert_format(window):
     spaced = []
     for token in window:
-        if token ==  _CPADS:
+        if token == _CPADS:
             spaced.append(_CPADS)
         elif token == _CPADE:
             spaced.append(_CPADE)
@@ -117,8 +117,8 @@ def prepare_train_files(data_dir, train_portion=0.9, reuse=False):
             inp, out = in_win[ngram // 2].lower(), out.lower()
             if not valid_token(inp):
                 continue
-            if inp in aspell:
-                continue
+            # if inp in aspell:
+            #     continue
 
             writeToFile(en_train, sep.join(convert_format(in_win)) + '\n')
             writeToFile(fr_train, ' '.join(list(out.replace(' ', '_')))
@@ -131,8 +131,8 @@ def prepare_train_files(data_dir, train_portion=0.9, reuse=False):
             inp, out = in_win[ngram // 2].lower(), out.lower()
             if not valid_token(inp):
                 continue
-            if inp in aspell:
-                continue
+            # if inp in aspell:
+            #     continue
 
             writeToFile(en_dev, sep.join(convert_format(in_win)) + '\n')
             writeToFile(fr_dev, ' '.join(list(out.replace(' ', '_')))

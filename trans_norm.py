@@ -47,7 +47,7 @@ import seq2seq_model
 from utilities import deleteFiles, writeToFile
 
 
-tf.app.flags.DEFINE_float("learning_rate", 0.0005, "Learning rate.")
+tf.app.flags.DEFINE_float("learning_rate", 0.00005, "Learning rate.")
 tf.app.flags.DEFINE_float("learning_rate_decay_factor", 0.99,
                           "Learning rate decays by this much.")
 tf.app.flags.DEFINE_float("max_gradient_norm", 5.0,
@@ -154,7 +154,6 @@ def train():
     print ("Reading development and training data (limit: %d)."
            % FLAGS.max_train_data_size)
     dev_set = read_data(en_dev, fr_dev)
-    test_set = read_data(en_test, fr_test)
     train_set = read_data(en_train, fr_train, FLAGS.max_train_data_size)
     train_bucket_sizes = [len(train_set[b]) for b in xrange(len(_buckets))]
     print('Bucket Sizes : {}'.format(train_bucket_sizes))
@@ -196,7 +195,7 @@ def train():
       if current_step % FLAGS.steps_per_checkpoint == 0:
         # Print statistics for the previous epoch.
         perplexity = math.expm1(loss) if loss < 300 else float('inf')
-        print ("global step %d learning rate %.4f step-time %.2f perplexity "
+        print ("global step %d learning rate %.7f step-time %.2f perplexity "
                "%.5f" % (model.global_step.eval(), model.learning_rate.eval(),
                          step_time, perplexity))
         print('training loss : {}'.format(loss))
@@ -211,24 +210,22 @@ def train():
         # Run evals on development set and print their perplexity.
         bucket_ppx = []
         for bucket_id in xrange(len(_buckets)):
-          encoder_inputs, decoder_inputs, target_weights = model.get_batch(
-              test_set, bucket_id)
-          _, eval_loss, _ = model.step(sess, encoder_inputs, decoder_inputs,
-                                       target_weights, bucket_id, True)
-          eval_ppx = math.exp(eval_loss) if eval_loss < 300 else float('inf')
-          print("  test eval: bucket %d perplexity %.2f" % (bucket_id, eval_ppx))
-        for bucket_id in xrange(len(_buckets)):
-          encoder_inputs, decoder_inputs, target_weights = model.get_batch(
-              dev_set, bucket_id)
-          _, eval_loss, _ = model.step(sess, encoder_inputs, decoder_inputs,
-                                       target_weights, bucket_id, True)
-          eval_ppx = math.exp(eval_loss) if eval_loss < 300 else float('inf')
-          bucket_ppx.append(eval_ppx)
-          print("  dev eval: bucket %d perplexity %.2f" % (bucket_id, eval_ppx))
+          dev_batches = [[u for u in k if u is not None] for k in
+                         itertools.izip_longest(
+                             *[dev_set[bucket_id][i::FLAGS.batch_size]
+                               for i in range(FLAGS.batch_size)])]
+          for batch in dev_batches[:-1]:
+            encoder_inputs, decoder_inputs, target_weights = model.prepare_batch(
+                batch, bucket_id)
+            _, eval_loss, _ = model.step(sess, encoder_inputs, decoder_inputs,
+                                         target_weights, bucket_id, True)
+            eval_ppx = math.exp(eval_loss) if eval_loss < 300 else float('inf')
+            bucket_ppx.append(eval_ppx)
         dev_ppx = np.mean(bucket_ppx)
+        print("  dev eval: perplexity %.5f" % (dev_ppx))
         history_ppxs.append(dev_ppx)
         if (len(history_ppxs) > FLAGS.patience and
-            dev_ppx >= np.array(history_ppxs)[:-FLAGS.patience].min()):
+           dev_ppx >= np.array(history_ppxs)[:-FLAGS.patience].min()):
           bad_counter += 1
           # if bad_counter > FLAGS.patience:
           #   print("Patience reached")
@@ -290,11 +287,11 @@ def eval_test():
     for bucket_id in range(len(_buckets)):
       all_batches = ([u for u in k if u is not None] for k in
                      itertools.izip_longest(
-                       *[test_set[bucket_id][i::FLAGS.batch_size]
-                         for i in range(FLAGS.batch_size)]))
+                         *[test_set[bucket_id][i::FLAGS.batch_size]
+                           for i in range(FLAGS.batch_size)]))
       for batch in all_batches:
         encoder_inputs, decoder_inputs, target_weights = model.prepare_batch(
-          batch, bucket_id)
+            batch, bucket_id)
         # setting the model batch size in case it is smaller (would be for the
         # last batch in the bucket)
         model.batch_size = len(batch)

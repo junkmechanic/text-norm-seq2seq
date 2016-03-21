@@ -196,9 +196,8 @@ def train():
         # Print statistics for the previous epoch.
         perplexity = math.expm1(loss) if loss < 300 else float('inf')
         print ("global step %d learning rate %.7f step-time %.2f perplexity "
-               "%.5f" % (model.global_step.eval(), model.learning_rate.eval(),
+               "%.9f" % (model.global_step.eval(), model.learning_rate.eval(),
                          step_time, perplexity))
-        print('training loss : {}'.format(loss))
         # Decrease learning rate if no improvement was seen over last 3 times.
         if len(previous_losses) > 2 and loss > max(previous_losses[-3:]):
           sess.run(model.learning_rate_decay_op)
@@ -260,6 +259,7 @@ def update_error_counts(in_seqs, out_seqs):
     else:
       if out == norm:
         stats['W2R'] += 1
+        # writeToFile(test_out, error_str.format('W2R', inp, norm, out))
       elif out == inp:
         stats['W2W_NC'] += 1
         writeToFile(test_out, error_str.format('W2W_NC', inp, norm, out))

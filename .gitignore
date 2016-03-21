@@ -3,6 +3,7 @@
 data
 *.pyc
 data_utils_tf.py
-debug.py
 normlzn_ind.py
 train
+dict
+scrap

@@ -43,7 +43,7 @@ def cleanupToken(token, rep_allowed=1):
 
 def build_sources():
     Sources = namedtuple('Sources', ['subdict', 'hbdict', 'utddict',
-                                     'baseline'])
+                                     'baseline', 'vocabplus'])
     hbdict = {}
     with open('./dict/hb.dict') as ifi:
         for line in ifi:
@@ -63,20 +63,19 @@ def build_sources():
                 utddict[tokens[0]] = tokens[1:]
     subdict = loadJSON('./dict/sub.dict')
     baseline = loadJSON('./dict/baseline_rules.json')
+    vocabplus = loadJSON('./dict/override.dict')
     return Sources(subdict=subdict, hbdict=hbdict, utddict=utddict,
-                   baseline=baseline)
+                   baseline=baseline, vocabplus=vocabplus)
 
 
-def ruleBasedPrediction(token, sources):
-    if token in sources.subdict:
-        return sources.subdict[token][0]
-    elif token in sources.baseline:
-        if len(sources.baseline[token]) < 2:
-            return sources.baseline[token][0]
-    # elif token in sources.hbdict:
-    #     return sources.hbdict[token][0]
-    # elif token in sources.utddict:
-    #     return sources.utddict[token][0]
+def ruleBasedPrediction(token, source):
+    if token in source:
+        return source[token][0]
+    # if token in sources.subdict:
+    #     return sources.subdict[token][0]
+    # elif token in sources.baseline:
+    #     if len(sources.baseline[token]) < 2:
+    #         return sources.baseline[token][0]
 
 
 def normalize(samples):
@@ -113,28 +112,40 @@ def normalize(samples):
     for sample in samples:
         sample['prediction'] = []
         sample['flags'] = []
-        for i, win in enumerate(context_window(sample['input'], ngram)):
+        for win in context_window(sample['input'], ngram):
             total += 1
             token = win[ngram // 2].lower()
             if not valid_token(token):
                 sample['prediction'].append(token)
-                sample['flags'].append(i)
+                sample['flags'].append('ignored')
                 ignored += 1
                 continue
-            elif token in aspell:
-                sample['prediction'].append(token)
-                sample['flags'].append(i)
-                ignored += 1
+            overridden = ruleBasedPrediction(token, sources.vocabplus)
+            if overridden:
+                sample['prediction'].append(overridden)
+                sample['flags'].append('overridden')
+                ruled += 1
                 continue
-            ruled_token = ruleBasedPrediction(token, sources)
+            ruled_token = ruleBasedPrediction(token, sources.subdict)
             if ruled_token:
                 sample['prediction'].append(ruled_token)
-                sample['flags'].append(i)
+                sample['flags'].append('ruled')
+                ruled += 1
+                continue
+            if token in aspell:
+                sample['prediction'].append(token)
+                sample['flags'].append('vocab')
+                ignored += 1
+                continue
+            baselined = ruleBasedPrediction(token, sources.baseline)
+            if baselined:
+                sample['prediction'].append(baselined)
+                sample['flags'].append('baselined')
                 ruled += 1
             else:
                 # Use the seq2seq model to predict the out token
                 sample['prediction'].append(predict_word(win))
-                sample['flags'].append(i)
+                sample['flags'].append('predicted')
                 predicted += 1
         count += 1
         if count % 1000 == 0:

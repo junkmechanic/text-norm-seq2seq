@@ -54,7 +54,8 @@ def classifyErrors(sample):
                 'token': input[i],
                 'norm': goal[i],
                 'out': pred[i],
-                'pos': str(i)
+                'pos': str(i),
+                'flag': sample['flags'][i],
             }
             include = True
             if goal[i].lower() == input[i].lower():
@@ -88,7 +89,7 @@ def classifyErrors(sample):
         return {"error": str(e)}
 
 
-def reportErrors(samples):
+def reportErrors(samples, outfile):
     pool = multiprocessing.Pool(processes=PNUM)
     stats = {'R2W': 0, 'W2R': 0, 'W2W_C': 0, 'W2W_NC': 0}
     all_errors = pool.map(classifyErrors, samples)
@@ -97,11 +98,13 @@ def reportErrors(samples):
                                               all_errors])
              for key in stats}
     print(stats)
-    saveJSON(all_errors, './data/norm_errors.json')
+    saveJSON(all_errors, outfile)
 
 
-def evaluate(samples=None):
+def evaluate(samples=None, outfile=None):
     if not samples:
         samples = loadJSON('./data/test_out.json')
+    if not outfile:
+        outfile = './data/norm_errors.json'
     evaluateStats(samples)
-    reportErrors(samples)
+    reportErrors(samples, outfile)

@@ -28,7 +28,7 @@ def build_aspell():
     lexicon = []
     with open('./data/aspell.dict') as dfile:
         for line in dfile:
-            lexicon.append(line.strip().lower())
+            lexicon.append(line.strip().lower().decode('utf-8'))
     return lexicon
 aspell = build_aspell()
 
@@ -36,7 +36,7 @@ aspell = build_aspell()
 def get_training_data(data_dir):
     training_files = [
         'train_data.json',
-        'clear_tweets.json'
+        # 'clear_tweets.json'
     ]
 
     all_samples = []

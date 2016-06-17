@@ -1,12 +1,9 @@
-# import numpy as np
-# import tensorflow as tf
 from collections import namedtuple
 from eval import evaluate
-# from trans_norm import create_model, _buckets
-from data_utils import context_window, convert_format, valid_token, \
-    build_aspell, sentence_to_token_ids, initialize_vocabulary, EOS_ID
+from data_utils import context_window, valid_token, build_aspell
 from utilities import loadJSON, saveJSON
 from diff_errors import perform_diff
+from multiprocessing import Pool
 
 
 def cleanupToken(token, rep_allowed=1):
@@ -72,11 +69,6 @@ def build_sources():
 def ruleBasedPrediction(token, source):
     if token in source:
         return source[token][0]
-    # if token in sources.subdict:
-    #     return sources.subdict[token][0]
-    # elif token in sources.baseline:
-    #     if len(sources.baseline[token]) < 2:
-    #         return sources.baseline[token][0]
 
 
 def get_prediction(pred_cache, index, position):
@@ -90,98 +82,62 @@ def postPred(word, aspell):
         possible = '%sg' % word
         if possible in aspell:
             word = possible
+    # elif re.match(r'.*(\w)(\1)$', word) and \
+    #         len(re.match(r'.*(\w)(\1)$', word).groups()) == 2 and \
+    #         word[:-1] in aspell:
+    #     word = word[:-1]
 
     return word
 
 
-def normalize(samples):
+sources = build_sources()
+aspell = build_aspell()
+pred_cache = loadJSON('./data/test_out_only_oov.json')
+pred_cache = {d['index']: {k: d[k] for k in d if k != 'index'}
+              for d in pred_cache}
+
+
+def concurrent_normalize(sample):
     ngram = 3
-    # sep = ' _S_ '
-    sources = build_sources()
-    aspell = build_aspell()
-
-    # Load seq2seq model
-    # sess = tf.Session()
-    # model = create_model(sess, True)
-    # model.batch_size = 1
-    # en_vocab, _ = initialize_vocabulary('./data/vocab.en')
-    # _, rev_fr_vocab = initialize_vocabulary('./data/vocab.fr')
-
-    # all the predictions
-    pred_cache = loadJSON('./data/test_out_only_oov.json')
-    pred_cache = {d['index']: {k: d[k] for k in d if k != 'index'}
-                  for d in pred_cache}
-
-    # def predict_word(in_win):
-    #     token_ids = sentence_to_token_ids(sep.join(convert_format(win)),
-    #                                       en_vocab)
-    #     bucket_id = min([b for b in xrange(len(_buckets))
-    #                      if _buckets[b][0] > len(token_ids)])
-    #     encoder_inputs, decoder_inputs, target_weights = model.get_batch(
-    #         {bucket_id: [(token_ids, [])]}, bucket_id)
-    #     _, _, output_logits = model.step(sess, encoder_inputs, decoder_inputs,
-    #                                      target_weights, bucket_id, True)
-    #     outputs = [int(np.argmax(logit, axis=1)) for logit in output_logits]
-    #     if EOS_ID in outputs:
-    #         outputs = outputs[:outputs.index(EOS_ID)]
-    #     out_token = ''.join([rev_fr_vocab[out] for out in outputs])
-    #     return out_token.replace('_', ' ')
-
-    count = 0
-    total, ignored, ruled, predicted = (0, 0, 0, 0)
-    print 'total no. of samples : ', len(samples)
-    for sample in samples:
-        sample['prediction'] = []
-        sample['flags'] = []
-        for i, win in enumerate(context_window(sample['input'], ngram)):
-            total += 1
-            token = win[ngram // 2].lower()
-            if not valid_token(token):
-                sample['prediction'].append(token)
-                sample['flags'].append('ignored')
-                ignored += 1
-                continue
-            overridden = ruleBasedPrediction(token, sources.vocabplus)
-            if overridden:
-                sample['prediction'].append(overridden)
-                sample['flags'].append('overridden')
-                ruled += 1
-                continue
-            ruled_token = ruleBasedPrediction(token, sources.subdict)
-            if ruled_token:
-                sample['prediction'].append(ruled_token)
-                sample['flags'].append('ruled')
-                ruled += 1
-                continue
-            if token in aspell:
-                sample['prediction'].append(token)
-                sample['flags'].append('vocab')
-                ignored += 1
-                continue
-            baselined = ruleBasedPrediction(token, sources.baseline)
-            if baselined:
-                sample['prediction'].append(baselined)
-                sample['flags'].append('baselined')
-                ruled += 1
-            else:
-                # Use the seq2seq model to predict the out token
-                nn_pred = get_prediction(pred_cache, sample['index'], i)
-                better_pred = postPred(nn_pred, aspell)
-                sample['prediction'].append(better_pred)
-                sample['flags'].append('predicted')
-                predicted += 1
-        count += 1
-        if count % 1000 == 0:
-            print 'completed {} samples'.format(count)
-    # sess.close()
-    print 'Total: {}\nIgnored: {}\nRuled: {}\nPredicted: {}'.format(
-        total, ignored, ruled, predicted
-    )
+    sample['prediction'] = []
+    sample['flags'] = []
+    for i, win in enumerate(context_window(sample['input'], ngram)):
+        token = win[ngram // 2].lower()
+        if not valid_token(token):
+            sample['prediction'].append(token)
+            sample['flags'].append('ignored')
+            continue
+        overridden = ruleBasedPrediction(token, sources.vocabplus)
+        if overridden:
+            sample['prediction'].append(overridden)
+            sample['flags'].append('overridden')
+            continue
+        ruled_token = ruleBasedPrediction(token, sources.subdict)
+        if ruled_token:
+            sample['prediction'].append(ruled_token)
+            sample['flags'].append('ruled')
+            continue
+        if token in aspell:
+            sample['prediction'].append(token)
+            sample['flags'].append('vocab')
+            continue
+        baselined = ruleBasedPrediction(token, sources.baseline)
+        if baselined:
+            sample['prediction'].append(baselined)
+            sample['flags'].append('baselined')
+        else:
+            # Use the seq2seq model to predict the out token
+            nn_pred = get_prediction(pred_cache, sample['index'], i)
+            better_pred = postPred(nn_pred, aspell)
+            sample['prediction'].append(better_pred)
+            sample['flags'].append('predicted')
+    return sample
 
 
 if __name__ == '__main__':
     samples = loadJSON('./data/test_truth.json')
-    normalize(samples)
+    pool = Pool(62)
+    samples = pool.map(concurrent_normalize, samples)
     saveJSON(samples, './data/test_out.json')
     evaluate(samples)
     perform_diff()

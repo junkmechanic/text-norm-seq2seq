@@ -8,80 +8,9 @@ from data_utils import context_window, convert_format, valid_token, \
 from utilities import loadJSON, saveJSON
 
 
-def cleanupToken(token, rep_allowed=1):
-    """
-    rep_allowed : no. of repretitions allowed. For example:
-        'sloooow' -> 'slow' for rep_allowed = 0
-        'sloooow' -> 'sloow' for rep_allowed = 1
-    """
-    Extra = namedtuple('Extra', ['index', 'times'])
-    extra_occurences = []
-    prev = ''
-    counter = 0
-    for i in range(len(token)):
-        if token[i] == prev:
-            counter += 1
-        else:
-            if counter > rep_allowed:
-                pos = i - (counter - rep_allowed)
-                extra = counter - rep_allowed
-                extra_occurences.append(Extra(index=pos, times=extra))
-            counter = 0
-            prev = token[i]
-    if counter > rep_allowed:
-        pos = i - (counter - rep_allowed)
-        extra = counter - rep_allowed
-        extra_occurences.append(Extra(index=pos, times=extra))
-    new_token = list(token)
-    deleted = 0
-    for extra in extra_occurences:
-        for _ in range(extra.times):
-            del new_token[extra.index - deleted]
-        deleted += extra.times
-    return ''.join(new_token)
-
-
-def build_sources():
-    Sources = namedtuple('Sources', ['subdict', 'hbdict', 'utddict',
-                                     'baseline', 'vocabplus'])
-    hbdict = {}
-    with open('./dict/hb.dict') as ifi:
-        for line in ifi:
-            noise, norm = map(str.strip, line.split('\t'))
-            if noise in hbdict:
-                hbdict[noise].append(norm)
-            else:
-                hbdict[noise] = [norm]
-    utddict = {}
-    with open('./dict/utd.dict') as ifi:
-        for line in ifi:
-            freq, token_str = line.split('\t')
-            tokens = map(str.strip, token_str.split('|'))
-            if tokens[0] in utddict:
-                utddict[tokens[0]].extend(tokens[1:])
-            else:
-                utddict[tokens[0]] = tokens[1:]
-    subdict = loadJSON('./dict/sub.dict')
-    baseline = loadJSON('./dict/baseline_rules.json')
-    vocabplus = loadJSON('./dict/override.dict')
-    return Sources(subdict=subdict, hbdict=hbdict, utddict=utddict,
-                   baseline=baseline, vocabplus=vocabplus)
-
-
-def ruleBasedPrediction(token, source):
-    if token in source:
-        return source[token][0]
-    # if token in sources.subdict:
-    #     return sources.subdict[token][0]
-    # elif token in sources.baseline:
-    #     if len(sources.baseline[token]) < 2:
-    #         return sources.baseline[token][0]
-
-
 def normalize(samples):
     ngram = 3
     sep = ' _S_ '
-    # sources = build_sources()
     aspell = build_aspell()
 
     # Load seq2seq model

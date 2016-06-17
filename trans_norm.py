@@ -56,7 +56,7 @@ tf.app.flags.DEFINE_integer("batch_size", 64,
                             "Batch size to use during training.")
 tf.app.flags.DEFINE_integer("size", 1024, "Size of each model layer.")
 tf.app.flags.DEFINE_integer("num_layers", 3, "Number of layers in the model.")
-tf.app.flags.DEFINE_integer("en_vocab_size", 43, "English vocabulary size.")
+tf.app.flags.DEFINE_integer("en_vocab_size", 44, "English vocabulary size.")
 tf.app.flags.DEFINE_integer("fr_vocab_size", 44, "French vocabulary size.")
 tf.app.flags.DEFINE_string("data_dir", "./data", "Data directory")
 tf.app.flags.DEFINE_string("train_dir", "./train", "Training directory.")
@@ -82,6 +82,12 @@ config_all = tf.ConfigProto()
 # See seq2seq_model.Seq2SeqModel for details of how they work.
 # _buckets = [(5, 10), (10, 15), (20, 25), (40, 50)]
 _buckets = [(10, 15), (20, 25), (40, 50)]
+
+
+def set_vocab_size(vocab_path, lang='en'):
+  with open(vocab_path) as ifi:
+    vocab_size = len(ifi.readlines())
+  FLAGS.__setattr__(lang + '_vocab_size', vocab_size)
 
 
 def read_data(source_path, target_path, max_size=None):
@@ -142,8 +148,12 @@ def create_model(session, forward_only):
 def train():
   print("Preparing data in %s" % FLAGS.data_dir)
   # change the reuse parameter if you want to build the data again
-  en_train, fr_train, en_dev, fr_dev, en_test, fr_test, _, _ = \
+  en_train, fr_train, en_dev, fr_dev, en_test, fr_test, \
+      en_vocab_path, fr_vocab_path = \
       data_utils.prepare_data(FLAGS.data_dir, reuse=FLAGS.reuse)
+
+  set_vocab_size(en_vocab_path, 'en')
+  set_vocab_size(fr_vocab_path, 'fr')
 
   with tf.Session(config=config_all) as sess:
     # Create model.

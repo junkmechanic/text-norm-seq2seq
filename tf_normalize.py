@@ -71,11 +71,6 @@ def build_sources():
 def ruleBasedPrediction(token, source):
     if token in source:
         return source[token][0]
-    # if token in sources.subdict:
-    #     return sources.subdict[token][0]
-    # elif token in sources.baseline:
-    #     if len(sources.baseline[token]) < 2:
-    #         return sources.baseline[token][0]
 
 
 def normalize(samples):

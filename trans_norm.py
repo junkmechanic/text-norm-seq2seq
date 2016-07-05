@@ -36,6 +36,7 @@ import os
 import sys
 import time
 import itertools
+from datetime import datetime
 
 import numpy as np
 from six.moves import xrange  # pylint: disable=redefined-builtin
@@ -47,7 +48,7 @@ import seq2seq_model
 from utilities import deleteFiles, writeToFile
 
 
-tf.app.flags.DEFINE_float("learning_rate", 0.5, "Learning rate.")
+tf.app.flags.DEFINE_float("learning_rate", 0.00005, "Learning rate.")
 tf.app.flags.DEFINE_float("learning_rate_decay_factor", 0.99,
                           "Learning rate decays by this much.")
 tf.app.flags.DEFINE_float("max_gradient_norm", 5.0,
@@ -56,7 +57,7 @@ tf.app.flags.DEFINE_integer("batch_size", 64,
                             "Batch size to use during training.")
 tf.app.flags.DEFINE_integer("size", 1024, "Size of each model layer.")
 tf.app.flags.DEFINE_integer("num_layers", 3, "Number of layers in the model.")
-tf.app.flags.DEFINE_integer("en_vocab_size", 42, "English vocabulary size.")
+tf.app.flags.DEFINE_integer("en_vocab_size", 43, "English vocabulary size.")
 tf.app.flags.DEFINE_integer("fr_vocab_size", 44, "French vocabulary size.")
 tf.app.flags.DEFINE_string("data_dir", "./data", "Data directory")
 tf.app.flags.DEFINE_string("train_dir", "./train", "Training directory.")
@@ -80,7 +81,14 @@ config_all = tf.ConfigProto()
 
 # We use a number of buckets and pad to the closest one for efficiency.
 # See seq2seq_model.Seq2SeqModel for details of how they work.
-_buckets = [(5, 10), (10, 15), (20, 25), (40, 50)]
+# _buckets = [(5, 10), (10, 15), (20, 25), (40, 50)]
+_buckets = [(10, 15), (20, 25), (40, 50)]
+
+
+def set_vocab_size(vocab_path, lang='en'):
+  with open(vocab_path) as ifi:
+    vocab_size = len(ifi.readlines())
+  FLAGS.__setattr__(lang + '_vocab_size', vocab_size)
 
 
 def read_data(source_path, target_path, max_size=None):
@@ -123,6 +131,7 @@ def read_data(source_path, target_path, max_size=None):
 
 def create_model(session, forward_only):
   """Create translation model and initialize or load parameters in session."""
+  print(FLAGS.en_vocab_size, FLAGS.fr_vocab_size)
   model = seq2seq_model.Seq2SeqModel(
       FLAGS.en_vocab_size, FLAGS.fr_vocab_size, _buckets,
       FLAGS.size, FLAGS.num_layers, FLAGS.max_gradient_norm, FLAGS.batch_size,
@@ -130,10 +139,12 @@ def create_model(session, forward_only):
       num_samples=0, forward_only=forward_only)
   ckpt = tf.train.get_checkpoint_state(FLAGS.train_dir)
   if ckpt and tf.gfile.Exists(ckpt.model_checkpoint_path):
-    print("Reading model parameters from %s" % ckpt.model_checkpoint_path)
+    print("{} : Reading model parameters from {}".format(
+        datetime.now().ctime(), ckpt.model_checkpoint_path))
     model.saver.restore(session, ckpt.model_checkpoint_path)
   else:
-    print("Created model with fresh parameters.")
+    print("{} : Created model with fresh parameters.".format(
+        datetime.now().ctime()))
     session.run(tf.initialize_all_variables())
   return model
 
@@ -141,8 +152,12 @@ def create_model(session, forward_only):
 def train():
   print("Preparing data in %s" % FLAGS.data_dir)
   # change the reuse parameter if you want to build the data again
-  en_train, fr_train, en_dev, fr_dev, en_test, fr_test, _, _ = \
+  en_train, fr_train, en_dev, fr_dev, en_test, fr_test, \
+      en_vocab_path, fr_vocab_path = \
       data_utils.prepare_data(FLAGS.data_dir, reuse=FLAGS.reuse)
+
+  set_vocab_size(en_vocab_path, 'en')
+  set_vocab_size(fr_vocab_path, 'fr')
 
   with tf.Session(config=config_all) as sess:
     # Create model.
@@ -153,7 +168,6 @@ def train():
     print ("Reading development and training data (limit: %d)."
            % FLAGS.max_train_data_size)
     dev_set = read_data(en_dev, fr_dev)
-    test_set = read_data(en_test, fr_test)
     train_set = read_data(en_train, fr_train, FLAGS.max_train_data_size)
     train_bucket_sizes = [len(train_set[b]) for b in xrange(len(_buckets))]
     print('Bucket Sizes : {}'.format(train_bucket_sizes))
@@ -195,10 +209,11 @@ def train():
       if current_step % FLAGS.steps_per_checkpoint == 0:
         # Print statistics for the previous epoch.
         perplexity = math.expm1(loss) if loss < 300 else float('inf')
-        print ("global step %d learning rate %.4f step-time %.2f perplexity "
-               "%.5f" % (model.global_step.eval(), model.learning_rate.eval(),
-                         step_time, perplexity))
-        print('training loss : {}'.format(loss))
+        print ("%s : global step %d learning rate %.7f step-time %.2f "
+               "perplexity %.9f" % (datetime.now().ctime(),
+                                    model.global_step.eval(),
+                                    model.learning_rate.eval(),
+                                    step_time, perplexity))
         # Decrease learning rate if no improvement was seen over last 3 times.
         if len(previous_losses) > 2 and loss > max(previous_losses[-3:]):
           sess.run(model.learning_rate_decay_op)
@@ -210,24 +225,22 @@ def train():
         # Run evals on development set and print their perplexity.
         bucket_ppx = []
         for bucket_id in xrange(len(_buckets)):
-          encoder_inputs, decoder_inputs, target_weights = model.get_batch(
-              test_set, bucket_id)
-          _, eval_loss, _ = model.step(sess, encoder_inputs, decoder_inputs,
-                                       target_weights, bucket_id, True)
-          eval_ppx = math.exp(eval_loss) if eval_loss < 300 else float('inf')
-          print("  test eval: bucket %d perplexity %.2f" % (bucket_id, eval_ppx))
-        for bucket_id in xrange(len(_buckets)):
-          encoder_inputs, decoder_inputs, target_weights = model.get_batch(
-              dev_set, bucket_id)
-          _, eval_loss, _ = model.step(sess, encoder_inputs, decoder_inputs,
-                                       target_weights, bucket_id, True)
-          eval_ppx = math.exp(eval_loss) if eval_loss < 300 else float('inf')
-          bucket_ppx.append(eval_ppx)
-          print("  dev eval: bucket %d perplexity %.2f" % (bucket_id, eval_ppx))
+          dev_batches = [[u for u in k if u is not None] for k in
+                         itertools.izip_longest(
+                             *[dev_set[bucket_id][i::FLAGS.batch_size]
+                               for i in range(FLAGS.batch_size)])]
+          for batch in dev_batches[:-1]:
+            encoder_inputs, decoder_inputs, target_weights = model.prepare_batch(
+                batch, bucket_id)
+            _, eval_loss, _ = model.step(sess, encoder_inputs, decoder_inputs,
+                                         target_weights, bucket_id, True)
+            eval_ppx = math.exp(eval_loss) if eval_loss < 300 else float('inf')
+            bucket_ppx.append(eval_ppx)
         dev_ppx = np.mean(bucket_ppx)
+        print("  dev eval: perplexity %.5f" % (dev_ppx))
         history_ppxs.append(dev_ppx)
         if (len(history_ppxs) > FLAGS.patience and
-            dev_ppx >= np.array(history_ppxs)[:-FLAGS.patience].min()):
+           dev_ppx >= np.array(history_ppxs)[:-FLAGS.patience].min()):
           bad_counter += 1
           # if bad_counter > FLAGS.patience:
           #   print("Patience reached")
@@ -249,7 +262,9 @@ def update_error_counts(in_seqs, out_seqs):
   stats = {'R2W': 0, 'W2R': 0, 'W2W_C': 0, 'W2W_NC': 0}
 
   for in_seq, out_seq in zip(in_seqs, out_seqs):
-    inp = ''.join([rev_en_vocab[i] for i in in_seq[0]]).replace('_', ' ')
+    # inp = ''.join([rev_en_vocab[i] for i in in_seq[0]]).replace('_', ' ')
+    inp = ''.join([rev_en_vocab[i] for i in in_seq[0]])
+    inp = inp.split('_S_')[1]
     norm = ''.join([rev_fr_vocab[i] for i in in_seq[1][:-1]]).replace('_', ' ')
     out = ''.join([rev_fr_vocab[i] for i in out_seq]).replace('_', ' ')
 
@@ -260,6 +275,7 @@ def update_error_counts(in_seqs, out_seqs):
     else:
       if out == norm:
         stats['W2R'] += 1
+        # writeToFile(test_out, error_str.format('W2R', inp, norm, out))
       elif out == inp:
         stats['W2W_NC'] += 1
         writeToFile(test_out, error_str.format('W2W_NC', inp, norm, out))
@@ -287,11 +303,11 @@ def eval_test():
     for bucket_id in range(len(_buckets)):
       all_batches = ([u for u in k if u is not None] for k in
                      itertools.izip_longest(
-                       *[test_set[bucket_id][i::FLAGS.batch_size]
-                         for i in range(FLAGS.batch_size)]))
+                         *[test_set[bucket_id][i::FLAGS.batch_size]
+                           for i in range(FLAGS.batch_size)]))
       for batch in all_batches:
         encoder_inputs, decoder_inputs, target_weights = model.prepare_batch(
-          batch, bucket_id)
+            batch, bucket_id)
         # setting the model batch size in case it is smaller (would be for the
         # last batch in the bucket)
         model.batch_size = len(batch)

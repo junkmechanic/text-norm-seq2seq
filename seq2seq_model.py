@@ -107,8 +107,11 @@ class Seq2SeqModel(object):
     # The seq2seq function: we use embedding for the input and attention.
     def seq2seq_f(encoder_inputs, decoder_inputs, do_decode):
       return tf.nn.seq2seq.embedding_attention_seq2seq(
-          encoder_inputs, decoder_inputs, cell, source_vocab_size,
-          target_vocab_size, output_projection=output_projection,
+          encoder_inputs, decoder_inputs, cell,
+          num_encoder_symbols=source_vocab_size,
+          num_decoder_symbols=target_vocab_size,
+          embedding_size=size,
+          output_projection=output_projection,
           feed_previous=do_decode)
 
     # Feeds for inputs.
@@ -286,11 +289,15 @@ class Seq2SeqModel(object):
     return batch_encoder_inputs, batch_decoder_inputs, batch_weights
 
   def prepare_batch(self, batch, bucket_id):
+    """
+    This does the same thing that get_batch does, i.e. change the input data to
+    batch-major format. But it operates on a single mini-batch passed to it
+    rather than choosing a random batch from a bucket.
+    """
     encoder_size, decoder_size = self.buckets[bucket_id]
     encoder_inputs, decoder_inputs = [], []
 
     batch_size = min(self.batch_size, len(batch))
-    encoder_inputs, decoder_inputs = [], []
 
     for sample in batch:
       encoder_input, decoder_input = sample

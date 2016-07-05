@@ -26,7 +26,7 @@ UNK_ID = 3
 
 def build_aspell():
     lexicon = []
-    with open('./data/aspell.dict') as dfile:
+    with open('./dict/aspell.dict') as dfile:
         for line in dfile:
             lexicon.append(line.strip().lower().decode('utf-8'))
     return lexicon

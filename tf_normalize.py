@@ -73,6 +73,22 @@ def ruleBasedPrediction(token, source):
         return source[token][0]
 
 
+def postPred(word, aspell):
+    word = cleanupToken(word)
+
+    if word.endswith('in'):
+        possible = '%sg' % word
+        if possible in aspell:
+            word = possible
+    # this is too aggressive
+    # elif re.match(r'.*(\w)(\1)$', word) and \
+    #         len(re.match(r'.*(\w)(\1)$', word).groups()) == 2 and \
+    #         word[:-1] in aspell:
+    #     word = word[:-1]
+
+    return word
+
+
 def normalize(samples):
     ngram = 3
     sep = ' _S_ '

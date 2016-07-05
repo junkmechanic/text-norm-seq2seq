@@ -82,10 +82,6 @@ def postPred(word, aspell):
         possible = '%sg' % word
         if possible in aspell:
             word = possible
-    # elif re.match(r'.*(\w)(\1)$', word) and \
-    #         len(re.match(r'.*(\w)(\1)$', word).groups()) == 2 and \
-    #         word[:-1] in aspell:
-    #     word = word[:-1]
 
     return word
 

@@ -36,6 +36,7 @@ import os
 import sys
 import time
 import itertools
+from datetime import datetime
 
 import numpy as np
 from six.moves import xrange  # pylint: disable=redefined-builtin
@@ -56,7 +57,7 @@ tf.app.flags.DEFINE_integer("batch_size", 64,
                             "Batch size to use during training.")
 tf.app.flags.DEFINE_integer("size", 1024, "Size of each model layer.")
 tf.app.flags.DEFINE_integer("num_layers", 3, "Number of layers in the model.")
-tf.app.flags.DEFINE_integer("en_vocab_size", 44, "English vocabulary size.")
+tf.app.flags.DEFINE_integer("en_vocab_size", 43, "English vocabulary size.")
 tf.app.flags.DEFINE_integer("fr_vocab_size", 44, "French vocabulary size.")
 tf.app.flags.DEFINE_string("data_dir", "./data", "Data directory")
 tf.app.flags.DEFINE_string("train_dir", "./train", "Training directory.")
@@ -130,6 +131,7 @@ def read_data(source_path, target_path, max_size=None):
 
 def create_model(session, forward_only):
   """Create translation model and initialize or load parameters in session."""
+  print(FLAGS.en_vocab_size, FLAGS.fr_vocab_size)
   model = seq2seq_model.Seq2SeqModel(
       FLAGS.en_vocab_size, FLAGS.fr_vocab_size, _buckets,
       FLAGS.size, FLAGS.num_layers, FLAGS.max_gradient_norm, FLAGS.batch_size,
@@ -137,10 +139,12 @@ def create_model(session, forward_only):
       num_samples=0, forward_only=forward_only)
   ckpt = tf.train.get_checkpoint_state(FLAGS.train_dir)
   if ckpt and tf.gfile.Exists(ckpt.model_checkpoint_path):
-    print("Reading model parameters from %s" % ckpt.model_checkpoint_path)
+    print("{} : Reading model parameters from {}".format(
+        datetime.now().ctime(), ckpt.model_checkpoint_path))
     model.saver.restore(session, ckpt.model_checkpoint_path)
   else:
-    print("Created model with fresh parameters.")
+    print("{} : Created model with fresh parameters.".format(
+        datetime.now().ctime()))
     session.run(tf.initialize_all_variables())
   return model
 
@@ -205,9 +209,11 @@ def train():
       if current_step % FLAGS.steps_per_checkpoint == 0:
         # Print statistics for the previous epoch.
         perplexity = math.expm1(loss) if loss < 300 else float('inf')
-        print ("global step %d learning rate %.7f step-time %.2f perplexity "
-               "%.9f" % (model.global_step.eval(), model.learning_rate.eval(),
-                         step_time, perplexity))
+        print ("%s : global step %d learning rate %.7f step-time %.2f "
+               "perplexity %.9f" % (datetime.now().ctime(),
+                                    model.global_step.eval(),
+                                    model.learning_rate.eval(),
+                                    step_time, perplexity))
         # Decrease learning rate if no improvement was seen over last 3 times.
         if len(previous_losses) > 2 and loss > max(previous_losses[-3:]):
           sess.run(model.learning_rate_decay_op)

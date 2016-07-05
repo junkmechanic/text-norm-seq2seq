@@ -2,7 +2,7 @@ import numpy as np
 import tensorflow as tf
 from collections import namedtuple
 from eval import evaluate
-from trans_norm import create_model, _buckets
+from trans_norm import create_model, _buckets, set_vocab_size
 from data_utils import context_window, convert_format, valid_token, \
     build_aspell, sentence_to_token_ids, initialize_vocabulary, EOS_ID
 from utilities import loadJSON, saveJSON
@@ -15,6 +15,8 @@ def normalize(samples):
 
     # Load seq2seq model
     sess = tf.Session()
+    # set_vocab_size('./data/vocab.en', 'en')
+    # set_vocab_size('./data/vocab.fr', 'fr')
     model = create_model(sess, True)
     model.batch_size = 1
     en_vocab, _ = initialize_vocabulary('./data/vocab.en')

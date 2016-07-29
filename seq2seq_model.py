@@ -46,7 +46,7 @@ class Seq2SeqModel(object):
   def __init__(self, source_vocab_size, target_vocab_size, buckets, size,
                num_layers, max_gradient_norm, batch_size, learning_rate,
                learning_rate_decay_factor, use_lstm=False,
-               num_samples=512, forward_only=False):
+               forward_only=False):
     """Create the model.
 
     Args:
@@ -66,33 +66,17 @@ class Seq2SeqModel(object):
       learning_rate: learning rate to start with.
       learning_rate_decay_factor: decay learning rate by this much when needed.
       use_lstm: if true, we use LSTM cells instead of GRU cells.
-      num_samples: number of samples for sampled softmax.
       forward_only: if set, we do not construct the backward pass in the model.
     """
     self.source_vocab_size = source_vocab_size
     self.target_vocab_size = target_vocab_size
     self.buckets = buckets
     self.batch_size = batch_size
-    self.learning_rate = tf.Variable(float(learning_rate), trainable=False)
+    self.learning_rate = tf.Variable(float(learning_rate), trainable=False,
+                                     name="learning_rate")
     self.learning_rate_decay_op = self.learning_rate.assign(
         self.learning_rate * learning_rate_decay_factor)
-    self.global_step = tf.Variable(0, trainable=False)
-
-    # If we use sampled softmax, we need an output projection.
-    output_projection = None
-    softmax_loss_function = None
-    # Sampled softmax only makes sense if we sample less than vocabulary size.
-    if num_samples > 0 and num_samples < self.target_vocab_size:
-      w = tf.get_variable("proj_w", [size, self.target_vocab_size])
-      w_t = tf.transpose(w)
-      b = tf.get_variable("proj_b", [self.target_vocab_size])
-      output_projection = (w, b)
-
-      def sampled_loss(inputs, labels):
-        labels = tf.reshape(labels, [-1, 1])
-        return tf.nn.sampled_softmax_loss(w_t, b, inputs, labels, num_samples,
-                self.target_vocab_size)
-      softmax_loss_function = sampled_loss
+    self.global_step = tf.Variable(0, trainable=False, name="global_step")
 
     # Create the internal multi-layer cell for our RNN.
     single_cell = tf.nn.rnn_cell.GRUCell(size)
@@ -109,7 +93,6 @@ class Seq2SeqModel(object):
           num_encoder_symbols=source_vocab_size,
           num_decoder_symbols=target_vocab_size,
           embedding_size=size,
-          output_projection=output_projection,
           feed_previous=do_decode)
 
     # Feeds for inputs.
@@ -130,24 +113,24 @@ class Seq2SeqModel(object):
                for i in xrange(len(self.decoder_inputs) - 1)]
 
     # Training outputs and losses.
+    # `outputs` and `losses` is each a list containing as many elements as there
+    # are buckets.
+    # Each element in `output` is the op that gives the output for the
+    # seq2seq network for an input that fits into the corresponding bucket.
+    # So the second element is an op thats using all the variables used by the
+    # first element's as well as the portion of variables that correspond to the
+    # extra length of the second bucket.
+    # Each element in `losses` is an op that returns the scalar loss (scalar
+    # because `per_example_loss` is not set) from the corresponding bucket's
+    # output compared against the targets.
     if forward_only:
       self.outputs, self.losses = tf.nn.seq2seq.model_with_buckets(
           self.encoder_inputs, self.decoder_inputs, targets,
-          self.target_weights, buckets, lambda x, y: seq2seq_f(x, y, True),
-          softmax_loss_function=softmax_loss_function)
-      # If we use output projection, we need to project outputs for decoding.
-      if output_projection is not None:
-        for b in xrange(len(buckets)):
-          self.outputs[b] = [
-              tf.matmul(output, output_projection[0]) + output_projection[1]
-              for output in self.outputs[b]
-          ]
+          self.target_weights, buckets, lambda x, y: seq2seq_f(x, y, True))
     else:
       self.outputs, self.losses = tf.nn.seq2seq.model_with_buckets(
           self.encoder_inputs, self.decoder_inputs, targets,
-          self.target_weights, buckets,
-          lambda x, y: seq2seq_f(x, y, False),
-          softmax_loss_function=softmax_loss_function)
+          self.target_weights, buckets, lambda x, y: seq2seq_f(x, y, False))
 
     # Gradients and SGD update operation for training the model.
     params = tf.trainable_variables()

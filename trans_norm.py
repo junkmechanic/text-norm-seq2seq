@@ -70,7 +70,7 @@ tf.app.flags.DEFINE_boolean("decode", False,
 tf.app.flags.DEFINE_boolean("self_test", False,
                             "Run a self-test if this is set to True.")
 tf.app.flags.DEFINE_integer("patience", 20, "Patience")
-tf.app.flags.DEFINE_boolean("reuse", False, "Reuse prepared data")
+tf.app.flags.DEFINE_boolean("reuse", True, "Reuse prepared data")
 
 FLAGS = tf.app.flags.FLAGS
 
@@ -135,8 +135,8 @@ def create_model(session, forward_only):
   model = seq2seq_model.Seq2SeqModel(
       FLAGS.en_vocab_size, FLAGS.fr_vocab_size, _buckets,
       FLAGS.size, FLAGS.num_layers, FLAGS.max_gradient_norm, FLAGS.batch_size,
-      FLAGS.learning_rate, FLAGS.learning_rate_decay_factor,
-      num_samples=0, forward_only=forward_only)
+      FLAGS.learning_rate, FLAGS.learning_rate_decay_factor, use_lstm=True,
+      forward_only=forward_only)
   ckpt = tf.train.get_checkpoint_state(FLAGS.train_dir)
   if ckpt and tf.gfile.Exists(ckpt.model_checkpoint_path):
     print("{} : Reading model parameters from {}".format(
@@ -181,6 +181,15 @@ def train():
 
     if not os.path.exists(FLAGS.train_dir):
       os.makedirs(FLAGS.train_dir)
+
+    # Creating summaries for the parameters
+    summaries = tf.get_collection(tf.GraphKeys.SUMMARIES)
+    for var in tf.trainable_variables():
+      summaries.append(tf.histogram_summary(var.op.name, var))
+
+    # Creating a summary writer
+    summary_writer = tf.train.SummaryWriter(FLAGS.train_dir, sess.graph)
+    summary_op = tf.merge_all_summaries()
 
     # This is the training loop.
     step_time, loss = 0.0, 0.0
@@ -238,6 +247,8 @@ def train():
             bucket_ppx.append(eval_ppx)
         dev_ppx = np.mean(bucket_ppx)
         print("  dev eval: perplexity %.5f" % (dev_ppx))
+        summary_str = sess.run(summary_op)
+        summary_writer.add_summary(summary_str, model.global_step.eval())
         history_ppxs.append(dev_ppx)
         if (len(history_ppxs) > FLAGS.patience and
            dev_ppx >= np.array(history_ppxs)[:-FLAGS.patience].min()):

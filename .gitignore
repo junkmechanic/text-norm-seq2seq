@@ -2,8 +2,6 @@
 .venv
 data
 *.pyc
-data_utils_tf.py
-normlzn_ind.py
 train
 dict
 scrap

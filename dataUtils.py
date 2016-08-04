@@ -4,7 +4,9 @@ from __future__ import print_function
 import os
 import numpy as np
 import random
+from itertools import izip
 
+import tensorflow as tf
 from tensorflow.python.platform import gfile
 from utilities import deleteFiles, writeToFile, saveJSON, loadJSON
 
@@ -23,8 +25,6 @@ class DataSource:
     This is the base class for all data sources. It accepts the dir in which
     the processed data will be stored.
 
-    Please give it a list of files for `(train/test)_files` even if there's a
-    single file as I am too lazy to do list instance checks on that argument.
     Each entry in the file_list should be the complete path. No path inference
     is done on the file_list.
 
@@ -37,6 +37,10 @@ class DataSource:
     `use_vocab` lets you provide a path to a vocabulary. If not specified, a
     vocabulary will be created from the data provided in its own 'data_dir'.
     The value of `use_vocab` should be the dir in which the vocab files exist.
+    For example `project_root/data/default`
+
+    `filter_vocab_test/train` are flags to indicate whether clean words would
+    be filtered out (not considered) while building the dataset.
 
     The members that are defined later are:
         inp_vocab_path
@@ -54,16 +58,16 @@ class DataSource:
         if not os.path.exists(self.data_dir):
             os.makedirs(self.data_dir)
 
-        self.train_files = train_files if train_files else []
-        self.test_files = test_files if test_files else []
+        self.train_files = train_files if isinstance(train_files, list) \
+            else [train_files] if train_files else []
+        self.test_files = test_files if isinstance(test_files, list) \
+            else [test_files] if test_files else []
 
         self.seed = seed
         self.train_ratio = train_ratio
         self.dev_ratio = dev_ratio
         self.ngram = ngram
-        self.inp_vocab_path = os.path.join(use_vocab, 'vocab.inp') \
-            if use_vocab else None
-        self.out_vocab_path = os.path.join(use_vocab, 'vocab.out') \
+        self.vocab_path = os.path.join(use_vocab, 'vocab') \
             if use_vocab else None
         self.filter_vocab_train = filter_vocab_train
         self.filter_vocab_test = filter_vocab_test
@@ -90,47 +94,55 @@ class DataSource:
         saveJSON(attributes, os.path.join(self.data_dir, 'state.json'))
 
     def build_vocabulary(self):
-        self.inp_vocab_path = os.path.join(self.data_dir, 'vocab.inp')
-        self.out_vocab_path = os.path.join(self.data_dir, 'vocab.out')
+        self.vocab_path = os.path.join(self.data_dir, 'vocab')
 
-        def create_vocabulary(vocab_path, data_path):
-            if self.reuse and os.path.exists(vocab_path):
-                return
-            deleteFiles([vocab_path])
-            vocab = {}
+        if self.reuse and os.path.exists(self.vocab_path):
+            return
+        deleteFiles([self.vocab_path])
+        vocab = {}
+        for data_path in [self.train_path + '.inp', self.train_path + '.out']:
             with open(data_path) as f:
                 for line in f:
                     for token in line.split():
-                        if token in vocab:
-                            vocab[token] += 1
-                        else:
-                            vocab[token] = 1
-            vocab_list = _START_VOCAB + sorted(vocab, key=vocab.get,
-                                               reverse=True)
-            writeToFile(vocab_path, '\n'.join(vocab_list))
-
-        create_vocabulary(self.inp_vocab_path, self.train_path + '.inp')
-        create_vocabulary(self.out_vocab_path, self.train_path + '.out')
+                        vocab[token] = vocab.get(token, 0) + 1
+        vocab_list = _START_VOCAB + sorted(vocab, key=vocab.get, reverse=True)
+        writeToFile(self.vocab_path, '\n'.join(vocab_list))
 
     def build_ids(self):
 
-        def data_to_token_ids(data_path, target_path, vocab_path):
+        def iter_over(inp_filename, out_filename):
+            with open(inp_filename) as inp, open(out_filename) as out:
+                for inp_seq, out_seq in izip(inp, out):
+                    yield inp_seq.strip(), out_seq.strip()
+
+        def format_sequence(sequence):
+            return tf.train.FeatureList(
+                feature=[
+                    tf.train.Feature(int64_list=tf.train.Int64List(value=[s]))
+                    for s in sequence
+                ]
+            )
+
+        vocab, _ = self.initialize_vocabulary(self.vocab_path)
+        for set_type in [self.train_path, self.dev_path, self.test_path]:
+            target_path = set_type + '.ids.bin'
             if self.reuse and os.path.exists(target_path):
                 return
             deleteFiles([target_path])
-            vocab, _ = self.initialize_vocabulary(vocab_path)
-            with gfile.GFile(data_path, mode="r") as data_file:
-                with gfile.GFile(target_path, mode="w") as tokens_file:
-                    for line in data_file:
-                        token_ids = self.sentence_to_token_ids(line, vocab)
-                        tokens_file.write(" ".join([str(tok) for tok in
-                                                    token_ids]) + "\n")
-
-        for set_type in [self.train_path, self.dev_path, self.test_path]:
-            data_to_token_ids(set_type + '.inp', set_type + '.ids.inp',
-                              self.inp_vocab_path)
-            data_to_token_ids(set_type + '.out', set_type + '.ids.out',
-                              self.out_vocab_path)
+            writer = tf.python_io.TFRecordWriter(target_path)
+            for in_seq, out_seq in iter_over(set_type + '.inp',
+                                             set_type + '.out'):
+                in_tokens = self.sentence_to_token_ids(in_seq, vocab)
+                out_tokens = self.sentence_to_token_ids(out_seq, vocab)
+                example = tf.train.SequenceExample(
+                    feature_lists=tf.train.FeatureLists(
+                    feature_list={
+                        'inp_seq': format_sequence(in_tokens),
+                        'out_seq': format_sequence(out_tokens),
+                    }
+                ))
+                writer.write(example.SerializeToString())
+            writer.close()
 
     def prepare_samples(self):
         sep = ' {} '.format(_SEP)
@@ -169,15 +181,25 @@ class DataSource:
                 self.context_window(train_samples[idx]['input'], self.ngram),
                 train_samples[idx]['output']
             ):
-                inp, out = in_win[self.ngram // 2].lower(), out.lower()
-                if not self.valid_token(inp):
+                inp = in_win[self.ngram // 2].lower()
+                out = list(out.lower().replace(' ', '_')) + [_EOS]
+                # If the output is blank, then we ignore the sample since we do
+                # not want to consider such cases for training. Example if the
+                # input was ['b', 'cuz'] the output will be ['because', ''].
+                # For now, the model is not being trained to recognize that.
+                if not self.valid_token(inp) or len(out) == 0:
                     continue
                 if self.filter_vocab_train and inp in self.aspell:
                     continue
                 writeToFile(inp_train,
                             sep.join(self.convert_format(in_win)) + '\n')
-                writeToFile(out_train,
-                            ' '.join(list(out.replace(' ', '_'))) + '\n')
+                # The output sequence might contain space implying that the
+                # normalized output was a set of two words. This space is
+                # represented as an underscore (`_`) becasue space is used as a
+                # delimited in the input format.
+                # Later while decoding, the output of the model should be
+                # processed to replace underscores with spaces.
+                writeToFile(out_train, ' '.join(out) + '\n')
 
         # Dev Set
         for idx in shuffled_indices[num_train_samples:num_trn_dev_samples]:
@@ -185,16 +207,16 @@ class DataSource:
                 self.context_window(train_samples[idx]['input'], self.ngram),
                 train_samples[idx]['output']
             ):
-                inp, out = in_win[self.ngram // 2].lower(), out.lower()
-                if not self.valid_token(inp):
+                inp = in_win[self.ngram // 2].lower()
+                out = list(out.lower().replace(' ', '_')) + [_EOS]
+                if not self.valid_token(inp) or len(out) == 0:
                     continue
                 if self.filter_vocab_train and inp in self.aspell:
                     continue
 
                 writeToFile(inp_dev, sep.join(self.convert_format(in_win))
                             + '\n')
-                writeToFile(out_dev, ' '.join(list(out.replace(' ', '_')))
-                            + '\n')
+                writeToFile(out_dev, ' '.join(out) + '\n')
 
         # Test Set
         test_samples.extend(train_samples[num_trn_dev_samples:])
@@ -203,16 +225,16 @@ class DataSource:
                 self.context_window(sample['input'], self.ngram),
                 sample['output']
             ):
-                inp, out = in_win[self.ngram // 2].lower(), out.lower()
-                if not self.valid_token(inp):
+                inp = in_win[self.ngram // 2].lower()
+                out = list(out.lower().replace(' ', '_')) + [_EOS]
+                if not self.valid_token(inp) or len(out) == 0:
                     continue
                 if self.filter_vocab_test and inp in self.aspell:
                     continue
 
                 writeToFile(inp_test, sep.join(self.convert_format(in_win))
                             + '\n')
-                writeToFile(out_test, ' '.join(list(out.replace(' ', '_')))
-                            + '\n')
+                writeToFile(out_test, ' '.join(out) + '\n')
 
     @staticmethod
     def valid_token(token):

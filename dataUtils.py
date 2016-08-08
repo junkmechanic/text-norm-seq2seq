@@ -43,8 +43,6 @@ class DataSource:
     be filtered out (not considered) while building the dataset.
 
     The members that are defined later are:
-        inp_vocab_path
-        out_vocab_path
         aspell
 
     """
@@ -67,8 +65,8 @@ class DataSource:
         self.train_ratio = train_ratio
         self.dev_ratio = dev_ratio
         self.ngram = ngram
-        self.vocab_path = os.path.join(use_vocab, 'vocab') \
-            if use_vocab else None
+        self.vocab_path = os.path.join(use_vocab, 'vocab') if use_vocab \
+            else os.path.join(self.data_dir, 'vocab')
         self.filter_vocab_train = filter_vocab_train
         self.filter_vocab_test = filter_vocab_test
         self.reuse = reuse
@@ -79,7 +77,10 @@ class DataSource:
         self.test_path = os.path.join(self.data_dir, 'test')
         self.prepare_samples()
         if not use_vocab:
-            self.build_vocabulary()
+            self.vocab_size = self.build_vocabulary()
+        else:
+            with open(self.vocab_path) as ifi:
+                self.vocab_size = len(ifi.readlines())
         self.build_ids()
         self.save_state()
 
@@ -94,10 +95,9 @@ class DataSource:
         saveJSON(attributes, os.path.join(self.data_dir, 'state.json'))
 
     def build_vocabulary(self):
-        self.vocab_path = os.path.join(self.data_dir, 'vocab')
-
         if self.reuse and os.path.exists(self.vocab_path):
-            return
+            with open(self.vocab_path) as ifi:
+                return len(ifi.readlines())
         deleteFiles([self.vocab_path])
         vocab = {}
         for data_path in [self.train_path + '.inp', self.train_path + '.out']:
@@ -107,6 +107,7 @@ class DataSource:
                         vocab[token] = vocab.get(token, 0) + 1
         vocab_list = _START_VOCAB + sorted(vocab, key=vocab.get, reverse=True)
         writeToFile(self.vocab_path, '\n'.join(vocab_list))
+        return len(vocab_list)
 
     def build_ids(self):
 
@@ -136,11 +137,10 @@ class DataSource:
                 out_tokens = self.sentence_to_token_ids(out_seq, vocab)
                 example = tf.train.SequenceExample(
                     feature_lists=tf.train.FeatureLists(
-                    feature_list={
-                        'inp_seq': format_sequence(in_tokens),
-                        'out_seq': format_sequence(out_tokens),
-                    }
-                ))
+                        feature_list={
+                            'inp_seq': format_sequence(in_tokens),
+                            'out_seq': format_sequence(out_tokens),
+                        }))
                 writer.write(example.SerializeToString())
             writer.close()
 

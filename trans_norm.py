@@ -91,42 +91,44 @@ def set_vocab_size(vocab_path, lang='en'):
   FLAGS.__setattr__(lang + '_vocab_size', vocab_size)
 
 
-def read_data(source_path, target_path, max_size=None):
-  """Read data from source and target files and put into buckets.
-
-  Args:
-    source_path: path to the files with token-ids for the source language.
-    target_path: path to the file with token-ids for the target language;
-      it must be aligned with the source file: n-th line contains the desired
-      output for n-th line from the source_path.
-    max_size: maximum number of lines to read, all other will be ignored;
-      if 0 or None, data files will be read completely (no limit).
-
-  Returns:
-    data_set: a list of length len(_buckets); data_set[n] contains a list of
-      (source, target) pairs read from the provided data files that fit
-      into the n-th bucket, i.e., such that len(source) < _buckets[n][0] and
-      len(target) < _buckets[n][1]; source and target are lists of token-ids.
+def read_data(filename_queue):
   """
-  data_set = [[] for _ in _buckets]
-  with tf.gfile.GFile(source_path, mode="r") as source_file:
-    with tf.gfile.GFile(target_path, mode="r") as target_file:
-      source, target = source_file.readline(), target_file.readline()
-      counter = 0
-      while source and target and (not max_size or counter < max_size):
-        counter += 1
-        if counter % 100000 == 0:
-          print("  reading data line %d" % counter)
-          sys.stdout.flush()
-        source_ids = [int(x) for x in source.split()]
-        target_ids = [int(x) for x in target.split()]
-        target_ids.append(data_utils.EOS_ID)
-        for bucket_id, (source_size, target_size) in enumerate(_buckets):
-          if len(source_ids) < source_size and len(target_ids) < target_size:
-            data_set[bucket_id].append([source_ids, target_ids])
-            break
-        source, target = source_file.readline(), target_file.readline()
-  return data_set
+  This function reads the TFRecords file and returns a single sample tensor.
+  The returned tensor will generally be added to a queue.
+  """
+
+  reader = tf.RecordReader()
+  _, serialized_sample = reader.read(filename_queue)
+  context_features, sequences = tf.parse_single_sequence_example(
+      serialized_sample,
+      sequence_features={
+          'inp_seq': tf.FixedLenSequenceFeature((1,), tf.int64,
+                                                allow_missing=False),
+          'out_seq': tf.FixedLenSequenceFeature((1,), tf.int64,
+                                                allow_missing=False),
+      }
+  )
+
+  # since the SequenceExample is stored in at least a 2D array, the first
+  # dimension being the length of the sequence and the second being the feature
+  # size for each item in the sequence, we need to flatten it. This is because
+  # in our case, the items are merely token ids.
+  inp_seq = tf.reshape(sequences['inp_seq'], [-1])
+  out_seq = tf.reshape(sequences['out_seq'], [-1])
+
+  return inp_seq, out_seq
+
+
+def prepare_data_queues(datasource, set_type):
+  filenames = [getattr(datasource, set_type + '_path')]
+  filename_queue = tf.train.string_input_producer(filenames)
+  inp_seq, out_seq = read_data(filename_queue)
+
+  # next is to generate the batch using tf.train.shuffle_batch
+  inp_seq_batch, out_seq_batch = tf.train.shuffle_batch([inp_seq, out_seq],
+                                                        FLAGS.batch_size,
+                                                        dynamic_pad=True,
+                                                        name="sequence_batch")
 
 
 def create_model(session, forward_only):

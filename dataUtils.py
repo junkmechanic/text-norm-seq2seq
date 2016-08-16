@@ -17,7 +17,11 @@ _UNK = "_UNK"
 _CPADS = '_CPADS'
 _CPADE = '_CPADE'
 _SEP = '_S_'
-_START_VOCAB = [_PAD, _GO, _EOS]
+
+# Including padding in the beginning will ensure that index '0' in the
+# vocabulary is not occupied by and other character. This is in line with the
+# dynamic padding done during creation of batches later.
+_START_VOCAB = [_PAD]
 
 
 class DataSource:
@@ -182,7 +186,7 @@ class DataSource:
                 train_samples[idx]['output']
             ):
                 inp = in_win[self.ngram // 2].lower()
-                out = list(out.lower().replace(' ', '_')) + [_EOS]
+                out = [_GO] + list(out.lower().replace(' ', '_')) + [_EOS]
                 # If the output is blank, then we ignore the sample since we do
                 # not want to consider such cases for training. Example if the
                 # input was ['b', 'cuz'] the output will be ['because', ''].
@@ -208,7 +212,7 @@ class DataSource:
                 train_samples[idx]['output']
             ):
                 inp = in_win[self.ngram // 2].lower()
-                out = list(out.lower().replace(' ', '_')) + [_EOS]
+                out = [_GO] + list(out.lower().replace(' ', '_')) + [_EOS]
                 if not self.valid_token(inp) or len(out) == 0:
                     continue
                 if self.filter_vocab_train and inp in self.aspell:
@@ -226,7 +230,7 @@ class DataSource:
                 sample['output']
             ):
                 inp = in_win[self.ngram // 2].lower()
-                out = list(out.lower().replace(' ', '_')) + [_EOS]
+                out = [_GO] + list(out.lower().replace(' ', '_')) + [_EOS]
                 if not self.valid_token(inp) or len(out) == 0:
                     continue
                 if self.filter_vocab_test and inp in self.aspell:

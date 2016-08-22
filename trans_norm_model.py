@@ -2,6 +2,11 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import os
+import math
+import time
+from datetime import datetime
+
 import tensorflow as tf
 from tensorflow.python.ops import embedding_ops
 from tensorflow.python.ops import variable_scope as vs
@@ -27,20 +32,31 @@ class TransNormModel(object):
         learning_rate_decay_factor=0.99,
         use_lstm=True,
         forward_only=False,
-        prediction=False,
+        predict=False,
+        model_dir='./model'
     ):
         """
         The class will not hold variables from the graph, whereever possible.
 
         Args:
-            encoder_seq : a minibatch of encoder sequences in batch-major format
-                          with shape [batch_size, max_seq_len].
-                          The max_seq_len can vary.
-            decoder_seq : a minibatch of decoder sequences in batch-major format
-                          with shape [batch_size, max_seq_len]
+            encoder_seq : minibatch of encoder sequences in batch-major format
+                with shape [batch_size, max_seq_len].
+                The max_seq_len can vary.
+            decoder_seq : minibatch of decoder sequences in batch-major format
+                with shape [batch_size, max_seq_len]
+            forward_only : boolean flag to indicate if the backpropagation part
+                of the model is to be built or not. This is generally set when
+                the model graph is being rebuilt for validation and test sets.
+            predict : boolean to indicate if the model is being built for
+                training or prediction. In case of prediction, decoder sequence
+                is not expected and loss will not be calculated. decoder_seq
+                should still be provided which would ideally just be the symbol
+                _GO.
         """
         # TODO:
         # define arguments
+        # add predict
+        # add moving avg
         # experiments:
         #  - add attention mechanism
         #  - change weight decay
@@ -56,7 +72,21 @@ class TransNormModel(object):
         self.use_lstm = use_lstm
         self.cell_size = cell_size
         self.num_layers = num_layers
-        self.forward_only = forward_only
+        self.max_gradient_norm = max_gradient_norm
+        if not forward_only and predict:
+            raise ValueError('!forward_only and predict are mutually exclusive')
+        if not forward_only:
+            self.run_level = 1
+        else:
+            self.run_level = 2
+        if predict:
+            self.run_level = 3
+
+        self.model_dir = model_dir
+        if not os.path.exists(self.model_dir):
+            os.makedirs(self.model_dir)
+
+        # Building the graph
         self.learning_rate = tf.Variable(float(learning_rate), trainable=False,
                                          name="learning_rate")
         # this decay op can be replaced by an tf.train.exponential_decay, but
@@ -64,8 +94,6 @@ class TransNormModel(object):
         self.learning_rate_decay_op = self.learning_rate.assign(
             self.learning_rate * learning_rate_decay_factor)
         self.global_step = tf.Variable(0, trainable=False, name="global_step")
-
-        # Building the graph
 
         self.build_embedding()
 
@@ -81,8 +109,30 @@ class TransNormModel(object):
 
         # the embedded decoder input is a tensor of shape
         # [batch_size, max_seq_len, embedding_size]
-        # if not prediction:
         self.decoder_output, _ = self.build_decoder()
+        # the decoder_output tensor is of shape
+        # [batch_size, max_seq_len, vocab_size]
+        # tf.nn.sparse_softmax_cross_entropy_with_logits expects the input
+        # `logits` to have shape [batch_size, num_classes]
+        # for that the tensor decoder_output would have to be transposed and
+        # then sliced using tf.slice.
+        # It is easier to calculate the softmax entropy manually as we can then
+        # apply the mask representing the individual length of sequences in the
+        # batch
+        self.predictions = self.make_predictions()
+        # predictions has the same shape as decoder_output
+        if self.run_level < 3:
+            self.loss = self.compute_batch_loss()
+
+        # update_model is a op that applies gradients to the variables (model
+        # parameters)
+        # this should be evaluated/run for the updates to happen, typically
+        # during training
+        if self.run_level < 2:
+            self.update_model = self.backpropagate()
+
+        # saving the model
+        self.saver = tf.train.Saver(tf.all_variables())
 
     def build_embedding(self):
         with vs.variable_scope("embedding"):
@@ -133,7 +183,7 @@ class TransNormModel(object):
             # connected feed forward layer for sequence prediction
             cell = tf.nn.rnn_cell.OutputProjectionWrapper(cell, self.vocab_size)
 
-            if not self.forward_only:
+            if self.run_level == 1:
                 # this part will build the graph for learning
                 # the decoder outputs will be generated by dynamic unrolling of
                 # the RNN over the decoder input sequence
@@ -184,7 +234,7 @@ class TransNormModel(object):
                 state = (rnn_cell._packed_state(structure=cell.state_size,
                                                 state=state))
                 output, new_state = cell(prev, state)
-                output_ta_t.write(time, output)
+                output_ta_t = output_ta_t.write(time, output)
                 prev_symbol = tf.argmax(output, 1)
                 # prev_symbol is of shape [batch_size, 1] holding the index of
                 # the predicted character in the vocab. This needs to be
@@ -209,6 +259,101 @@ class TransNormModel(object):
             output_final = tf.transpose(output_final, [1, 0, 2],
                                         name='transpose_decoder_output')
             return output_final, state_final
+
+    def make_predictions(self):
+        with tf.op_scope([self.decoder_output], name="prediction_layer"):
+            # tf.nn.softmax takes inputs of rank 2, preferably of shape
+            # [batch_size, num_classes]
+            # decoder_output needs to be reshaped for this step
+            decoder_output_shape = tf.shape(self.decoder_output)
+            all_outputs = tf.reshape(self.decoder_output, [-1, self.vocab_size])
+            predictions = tf.nn.softmax(all_outputs, name="softmax_output")
+            predictions = tf.reshape(predictions, decoder_output_shape)
+            return predictions
+
+    def compute_batch_loss(self):
+        with tf.op_scope([self.decoder_seq, self.predictions],
+                         name="loss_computation"):
+            # the targets are just decoder_inputs shifted by 1
+            shifted = tf.slice(self.decoder_seq, begin=[0, 1], size=[-1, -1])
+            zeros = tf.zeros([self.batch_size, 1], dtype=self.decoder_seq.dtype)
+            # TODO: targets should probably be an instance variable
+            targets = tf.concat(1, [shifted, zeros])
+            # the targets need to be in one-hot vector form.
+            # tf.one_hot returns a tensor with type float32 by default
+            one_hot_targets = tf.one_hot(targets, self.vocab_size)
+            cross_entropy = one_hot_targets * tf.log(self.predictions)
+            cross_entropy = -tf.reduce_sum(cross_entropy, reduction_indices=2)
+            # cross_entropy is a tensor of shape [batch_size, max_seq_len]
+            seq_indicators = tf.to_float(tf.sign(targets),
+                                         name="cast_mask_float")
+            # mask the cross_entropy
+            cross_entropy *= seq_indicators
+
+            # cost over each sequence
+            cross_entropy = tf.reduce_sum(cross_entropy, reduction_indices=1)
+            cross_entropy /= tf.reduce_sum(seq_indicators, reduction_indices=1)
+
+            # cost over the entire batch
+            return tf.reduce_mean(cross_entropy)
+
+    def backpropagate(self):
+        with tf.op_scope([self.learning_rate, self.max_gradient_norm,
+                          self.global_step], name="gradient_computation"):
+            self.optimizer = tf.train.AdamOptimizer(self.learning_rate)
+            grads_vars = self.optimizer.compute_gradients(self.loss)
+            grads, vars = [g for g, v in grads_vars], [v for g, v in grads_vars]
+            clipped_grads, gnorm = tf.clip_by_global_norm(
+                grads, self.max_gradient_norm
+            )
+            return self.optimizer.apply_gradients(zip(clipped_grads, vars),
+                                                  global_step=self.global_step)
+
+    def learn(self, steps_per_checkpoint=200, model_dir=None):
+        if self.run_level > 1:
+            return ValueError('Current run level doesnt support training.\n' +
+                              'Check the flags `forward_only` and `predict`')
+        if not model_dir:
+            model_dir = self.model_dir
+        session_config = tf.ConfigProto(
+            allow_soft_placement=True,
+            log_device_placement=False
+        )
+        step_time, step_loss = 0.0, 0.0
+        with tf.Session(config=session_config) as sess:
+            self.load_model(sess, model_dir)
+
+            # training loop
+            while True:
+                step = self.global_step.eval()
+                start_time = time.time()
+                _, loss = sess.run([self.update_model, self.loss])
+                step_time += (time.time() - start_time) / steps_per_checkpoint
+                step_loss += loss / steps_per_checkpoint
+
+                if step % steps_per_checkpoint == 0:
+                    perplexity = math.expm1(step_loss) if loss < 300 else \
+                        float('inf')
+                    print('{} : step {} : learning rate {:8.7f} '
+                          'step time {:3.2f} perplexity {:10.9f}'.format(
+                              datetime.now().ctime(), step,
+                              self.learning_rate.eval(), step_time, perplexity
+                          ))
+                    ckpt_path = os.path.join(model_dir, 'transNormModel.ckpt')
+                    self.saver.save(sess, ckpt_path,
+                                    global_step=self.global_step)
+                    step_time, step_loss = 0.0, 0.0
+
+    def load_model(self, session, model_dir):
+        ckpt = tf.train.get_checkpoint_state(model_dir)
+        if ckpt and tf.gfile.Exists(ckpt.model_checkpoint_path):
+            print('{} : Reading model parameters from {}'.format(
+                datetime.now().ctime(), ckpt.model_checkpoint_path))
+            self.saver.restore(session, ckpt.model_checkpoint_path)
+        else:
+            print('{} : Creating model with fresh parameters'.format(
+                datetime.now().ctime()))
+            session.run(tf.initialize_all_variables())
 
 
 def _get_variable(name, shape, wd=None):

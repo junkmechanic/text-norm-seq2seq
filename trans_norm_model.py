@@ -7,6 +7,7 @@ import math
 import time
 from datetime import datetime
 
+import numpy as np
 import tensorflow as tf
 from tensorflow.python.ops import embedding_ops
 from tensorflow.python.ops import variable_scope as vs
@@ -23,6 +24,7 @@ class TransNormModel(object):
         self,
         encoder_seq,
         decoder_seq,
+        targets,
         vocab_size,
         batch_size=128,
         cell_size=1024,
@@ -67,6 +69,7 @@ class TransNormModel(object):
 
         self.encoder_seq = encoder_seq
         self.decoder_seq = decoder_seq
+        self.targets = targets
         self.vocab_size = vocab_size
         self.batch_size = batch_size
         self.use_lstm = use_lstm
@@ -134,6 +137,11 @@ class TransNormModel(object):
         # saving the model
         self.saver = tf.train.Saver(tf.all_variables())
 
+        self.sess_conf = tf.ConfigProto(
+            allow_soft_placement=True,
+            log_device_placement=False
+        )
+
     def build_embedding(self):
         with vs.variable_scope("embedding"):
             self.embedding = _get_variable(name="char_embedding",
@@ -198,7 +206,9 @@ class TransNormModel(object):
                 return self.manual_unroll(cell)
 
     def manual_unroll(self, cell):
-        with vs.variable_scope("rnn_unroll"):
+        # the name of the variable scope is to match that of the scope set by
+        # tf.rnn.dynamic_rnn so that the variables can be restored
+        with vs.variable_scope('RNN'):
             # this part will build the graph for testing/validation
             # the decoder will use the first symbol, _GO, as the first input
             # and will feed the output of the current step as the input for
@@ -269,23 +279,23 @@ class TransNormModel(object):
             all_outputs = tf.reshape(self.decoder_output, [-1, self.vocab_size])
             predictions = tf.nn.softmax(all_outputs, name="softmax_output")
             predictions = tf.reshape(predictions, decoder_output_shape)
+            predictions.set_shape(self.decoder_output.get_shape())
             return predictions
 
     def compute_batch_loss(self):
         with tf.op_scope([self.decoder_seq, self.predictions],
                          name="loss_computation"):
             # the targets are just decoder_inputs shifted by 1
-            shifted = tf.slice(self.decoder_seq, begin=[0, 1], size=[-1, -1])
-            zeros = tf.zeros([self.batch_size, 1], dtype=self.decoder_seq.dtype)
-            # TODO: targets should probably be an instance variable
-            targets = tf.concat(1, [shifted, zeros])
+            # shifted = tf.slice(self.decoder_seq, begin=[0, 1], size=[-1, -1])
+            # zeros = tf.zeros([self.batch_size, 1], dtype=self.decoder_seq.dtype)
+            # targets = tf.concat(1, [shifted, zeros])
             # the targets need to be in one-hot vector form.
             # tf.one_hot returns a tensor with type float32 by default
-            one_hot_targets = tf.one_hot(targets, self.vocab_size)
+            one_hot_targets = tf.one_hot(self.targets, self.vocab_size)
             cross_entropy = one_hot_targets * tf.log(self.predictions)
             cross_entropy = -tf.reduce_sum(cross_entropy, reduction_indices=2)
             # cross_entropy is a tensor of shape [batch_size, max_seq_len]
-            seq_indicators = tf.to_float(tf.sign(targets),
+            seq_indicators = tf.to_float(tf.sign(self.targets),
                                          name="cast_mask_float")
             # mask the cross_entropy
             cross_entropy *= seq_indicators
@@ -309,28 +319,36 @@ class TransNormModel(object):
             return self.optimizer.apply_gradients(zip(clipped_grads, vars),
                                                   global_step=self.global_step)
 
+    def load_model(self, session, model_dir):
+        ckpt = tf.train.get_checkpoint_state(model_dir)
+        if ckpt and tf.gfile.Exists(ckpt.model_checkpoint_path):
+            print('{} : Reading model parameters from {}'.format(
+                datetime.now().ctime(), ckpt.model_checkpoint_path))
+            self.saver.restore(session, ckpt.model_checkpoint_path)
+        else:
+            print('{} : Creating model with fresh parameters'.format(
+                datetime.now().ctime()))
+            session.run(tf.initialize_all_variables())
+        tf.train.start_queue_runners(session)
+
     def learn(self, steps_per_checkpoint=200, model_dir=None):
         if self.run_level > 1:
-            return ValueError('Current run level doesnt support training.\n' +
-                              'Check the flags `forward_only` and `predict`')
+            raise ValueError('Current run level doesnt support training.\n' +
+                             'Check the flags `forward_only` and `predict`')
         if not model_dir:
             model_dir = self.model_dir
-        session_config = tf.ConfigProto(
-            allow_soft_placement=True,
-            log_device_placement=False
-        )
         step_time, step_loss = 0.0, 0.0
-        with tf.Session(config=session_config) as sess:
+        with tf.Session(config=self.sess_conf) as sess:
             self.load_model(sess, model_dir)
 
             # training loop
             while True:
-                step = self.global_step.eval()
                 start_time = time.time()
                 _, loss = sess.run([self.update_model, self.loss])
                 step_time += (time.time() - start_time) / steps_per_checkpoint
                 step_loss += loss / steps_per_checkpoint
 
+                step = self.global_step.eval()
                 if step % steps_per_checkpoint == 0:
                     perplexity = math.expm1(step_loss) if loss < 300 else \
                         float('inf')
@@ -344,16 +362,37 @@ class TransNormModel(object):
                                     global_step=self.global_step)
                     step_time, step_loss = 0.0, 0.0
 
-    def load_model(self, session, model_dir):
-        ckpt = tf.train.get_checkpoint_state(model_dir)
-        if ckpt and tf.gfile.Exists(ckpt.model_checkpoint_path):
-            print('{} : Reading model parameters from {}'.format(
-                datetime.now().ctime(), ckpt.model_checkpoint_path))
-            self.saver.restore(session, ckpt.model_checkpoint_path)
-        else:
-            print('{} : Creating model with fresh parameters'.format(
-                datetime.now().ctime()))
-            session.run(tf.initialize_all_variables())
+    def test(self, num_examples, model_dir=None):
+        """
+        Ideally, the test would be done one example at a time.
+        The batch_size should be set to 1
+        """
+        if self.run_level != 2:
+            raise ValueError('Current run level doesnt support testing.\n' +
+                             'Check the flags `forward_only` and `predict`')
+        assert self.batch_size == 1
+        if not model_dir:
+            model_dir = self.model_dir
+        evaluations = []
+        for seq_preds, seq_targets in zip(tf.unpack(self.predictions),
+                                          tf.unpack(self.targets)):
+            evaluations.append(tf.nn.in_top_k(seq_preds, seq_targets, 1))
+        evals_int = tf.to_int32(evaluations)
+        evals_int = tf.pack(evals_int)
+
+        with tf.Session(config=self.sess_conf) as sess:
+            self.load_model(sess, model_dir)
+
+            hits, misses = 0, 0
+            for i in range(num_examples):
+                preds, targets = sess.run([evals_int, self.targets])
+                preds[preds == 0] = -1
+                seq_len_ind = np.sign(targets)
+                preds = preds * seq_len_ind
+                hits += (preds == 1).sum()
+                misses += (preds == -1).sum()
+
+            print('Total Hits : {}\nTotal Misses : {}'.format(hits, misses))
 
 
 def _get_variable(name, shape, wd=None):

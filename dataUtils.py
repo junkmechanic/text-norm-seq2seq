@@ -139,11 +139,13 @@ class DataSource:
                                              set_type + '.out'):
                 in_tokens = self.sentence_to_token_ids(in_seq, vocab)
                 out_tokens = self.sentence_to_token_ids(out_seq, vocab)
+                targets = out_tokens[1:] + [0]
                 example = tf.train.SequenceExample(
                     feature_lists=tf.train.FeatureLists(
                         feature_list={
                             'inp_seq': format_sequence(in_tokens),
                             'out_seq': format_sequence(out_tokens),
+                            'targets': format_sequence(targets),
                         }))
                 writer.write(example.SerializeToString())
             writer.close()
@@ -199,7 +201,7 @@ class DataSource:
                             sep.join(self.convert_format(in_win)) + '\n')
                 # The output sequence might contain space implying that the
                 # normalized output was a set of two words. This space is
-                # represented as an underscore (`_`) becasue space is used as a
+                # represented as an underscore (`_`) because space is used as a
                 # delimited in the input format.
                 # Later while decoding, the output of the model should be
                 # processed to replace underscores with spaces.
@@ -218,8 +220,8 @@ class DataSource:
                 if self.filter_vocab_train and inp in self.aspell:
                     continue
 
-                writeToFile(inp_dev, sep.join(self.convert_format(in_win))
-                            + '\n')
+                writeToFile(inp_dev, sep.join(self.convert_format(in_win)) +
+                            '\n')
                 writeToFile(out_dev, ' '.join(out) + '\n')
 
         # Test Set
@@ -236,8 +238,8 @@ class DataSource:
                 if self.filter_vocab_test and inp in self.aspell:
                     continue
 
-                writeToFile(inp_test, sep.join(self.convert_format(in_win))
-                            + '\n')
+                writeToFile(inp_test, sep.join(self.convert_format(in_win)) +
+                            '\n')
                 writeToFile(out_test, ' '.join(out) + '\n')
 
     @staticmethod

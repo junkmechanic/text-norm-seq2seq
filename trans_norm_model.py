@@ -222,7 +222,7 @@ class TransNormModel(object):
             int_time_steps = transposed.get_shape().with_rank(3).as_list()[0]
             # the transposed tensor will be unpacked so that each batch time
             # step can be extracted for decoding
-            # Since max_seq_len is not know, tf.unpack cannot be used.
+            # Since max_seq_len is not known, tf.unpack cannot be used.
             # TensorArray is to be used.
             input_ta = tf.TensorArray(
                 dtype=transposed.dtype,
@@ -319,7 +319,7 @@ class TransNormModel(object):
             return self.optimizer.apply_gradients(zip(clipped_grads, vars),
                                                   global_step=self.global_step)
 
-    def load_model(self, session, model_dir):
+    def load_model(self, session, coordinator, model_dir):
         ckpt = tf.train.get_checkpoint_state(model_dir)
         if ckpt and tf.gfile.Exists(ckpt.model_checkpoint_path):
             print('{} : Reading model parameters from {}'.format(
@@ -329,7 +329,8 @@ class TransNormModel(object):
             print('{} : Creating model with fresh parameters'.format(
                 datetime.now().ctime()))
             session.run(tf.initialize_all_variables())
-        tf.train.start_queue_runners(session)
+        threads = tf.train.start_queue_runners(session, coordinator)
+        return threads
 
     def learn(self, steps_per_checkpoint=200, model_dir=None):
         if self.run_level > 1:
@@ -339,7 +340,7 @@ class TransNormModel(object):
             model_dir = self.model_dir
         step_time, step_loss = 0.0, 0.0
         with tf.Session(config=self.sess_conf) as sess:
-            self.load_model(sess, model_dir)
+            self.load_model(sess, None, model_dir)
 
             # training loop
             while True:
@@ -380,19 +381,28 @@ class TransNormModel(object):
         evals_int = tf.to_int32(evaluations)
         evals_int = tf.pack(evals_int)
 
+        hits, misses = 0, 0
         with tf.Session(config=self.sess_conf) as sess:
-            self.load_model(sess, model_dir)
+            coord = tf.train.Coordinator()
+            threads = self.load_model(sess, coord, model_dir)
 
-            hits, misses = 0, 0
-            for i in range(num_examples):
-                preds, targets = sess.run([evals_int, self.targets])
-                preds[preds == 0] = -1
-                seq_len_ind = np.sign(targets)
-                preds = preds * seq_len_ind
-                hits += (preds == 1).sum()
-                misses += (preds == -1).sum()
+            try:
+                num_iter = 0
+                while num_iter < num_examples and not coord.should_stop():
+                    preds, targets = sess.run([evals_int, self.targets])
+                    preds[preds == 0] = -1
+                    seq_len_ind = np.sign(targets)
+                    preds = preds * seq_len_ind
+                    hits += (preds == 1).sum()
+                    misses += (preds == -1).sum()
+                    num_iter += 1
+            except Exception as e:
+                coord.request_stop(e)
 
-            print('Total Hits : {}\nTotal Misses : {}'.format(hits, misses))
+            coord.request_stop()
+            coord.join(threads)
+
+        print('Total Hits : {}\nTotal Misses : {}'.format(hits, misses))
 
 
 def _get_variable(name, shape, wd=None):

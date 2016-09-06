@@ -35,7 +35,9 @@ class TransNormModel(object):
         use_lstm=True,
         forward_only=False,
         predict=False,
-        model_dir='./model'
+        model_dir='./model',
+        eos_idx=8,
+        max_pred_length=50,
     ):
         """
         The class will not hold variables from the graph, whereever possible.
@@ -54,10 +56,12 @@ class TransNormModel(object):
                 is not expected and loss will not be calculated. decoder_seq
                 should still be provided which would ideally just be the symbol
                 _GO.
+
+        A note regarding `forward_only` and `predict`. Either both would be true
+        or both would be false or (forward_only=True and predict=False)
         """
         # TODO:
         # define arguments
-        # add predict
         # add moving avg
         # experiments:
         #  - add attention mechanism
@@ -76,6 +80,8 @@ class TransNormModel(object):
         self.cell_size = cell_size
         self.num_layers = num_layers
         self.max_gradient_norm = max_gradient_norm
+        self.eos_idx = eos_idx
+        self.max_pred_length = max_pred_length
         if not forward_only and predict:
             raise ValueError('!forward_only and predict are mutually exclusive')
         if not forward_only:
@@ -126,6 +132,8 @@ class TransNormModel(object):
         # predictions has the same shape as decoder_output
         if self.run_level < 3:
             self.loss = self.compute_batch_loss()
+        else:
+            self.predicted_word = tf.nn.top_k(self.predictions, k=1)
 
         # update_model is a op that applies gradients to the variables (model
         # parameters)
@@ -206,6 +214,18 @@ class TransNormModel(object):
                 return self.manual_unroll(cell)
 
     def manual_unroll(self, cell):
+        """
+        This method is written to mimic `tf.rnn.dynamic_rnn()` behavior. In fact
+        most of it is a shameless copy of the code from
+        `tf.rnn._dynamic_rnn_loop()`.
+        Except for the fact that the input is not known to the decoder. Hence
+        the output of the decoder at each time step will be utilized as its
+        input for the next time step.
+        This method also builds the graph for final prediction in which case the
+        output is generated from scratch. Only the first symbol (`_GO`) is fed
+        to the decoder.
+        """
+
         # the name of the variable scope is to match that of the scope set by
         # tf.rnn.dynamic_rnn so that the variables can be restored
         with vs.variable_scope('RNN'):
@@ -230,19 +250,57 @@ class TransNormModel(object):
                 tensor_array_name='dynamic_unpacked_input'
             )
             input_ta = input_ta.unpack(transposed)
-            output_ta = tf.TensorArray(
-                dtype=transposed.dtype,
-                size=tf.shape(transposed)[0],
-                tensor_array_name='dynamic_output'
-            )
+            if self.run_level < 3:
+                output_ta = tf.TensorArray(
+                    dtype=transposed.dtype,
+                    size=time_steps,
+                    tensor_array_name='dynamic_output'
+                )
+            else:
+                output_ta = tf.TensorArray(
+                    dtype=transposed.dtype,
+                    size=1,
+                    dynamic_size=True,
+                    tensor_array_name='dynamic_output'
+                )
             time = tf.constant(0, dtype=tf.int32, name="time")
             state = self.encoder_state
             state = rnn_cell._unpacked_state(state)
             prev = input_ta.read(time)
 
-            def _time_step(time, prev, output_ta_t, *state):
+            # the prediction round needs prev_symbol to decide when to stop the
+            # RNN
+            # this is a dummy value for the first iteration of the while loop.
+            # it can be anything but the index for _EOS which is meant to stop
+            # the while loop.
+            dummy_val = [i for i in range(self.vocab_size)
+                         if i != self.eos_idx][0]
+            # the shape of the variable representing the previous symbol should
+            # be [1] since the batch_size should ideally be 1 for prediction.
+            prev_symbol_dummy = tf.constant([dummy_val], dtype=tf.int64)
+            eos_val = tf.constant([self.eos_idx], dtype=tf.int64)
+            max_len = tf.constant([self.max_pred_length], dtype=tf.int32)
+
+            def pred_cond(time, prev, prev_symbol, output_ta_t, *state):
+                return tf.reshape(
+                    tf.logical_and(
+                        tf.less(time, max_len),
+                        tf.not_equal(prev_symbol, eos_val)
+                    ), []
+                )
+
+            def _time_step(time, prev, prev_symbol, output_ta_t, *state):
                 state = (rnn_cell._packed_state(structure=cell.state_size,
                                                 state=state))
+                # the reason for calling cell() here (as opposed to
+                # tf.rnn._rnn_step() with sequence_lengths) is that
+                # `manual_unroll` will only be called during the test or
+                # prediction run. And in either case, it is to be assumed that
+                # the output is not known.
+                # During test, the max_seq_len of the batch will be used to run
+                # the decoder for that many time steps.
+                # During prediction, the decoder needs to check for the presence
+                # of the `_EOS`.
                 output, new_state = cell(prev, state)
                 output_ta_t = output_ta_t.write(time, output)
                 prev_symbol = tf.argmax(output, 1)
@@ -254,14 +312,24 @@ class TransNormModel(object):
                     self.embedding, prev_symbol
                 )
                 new_state = tuple(rnn_cell._unpacked_state(new_state))
-                return (time + 1, emb_prev, output_ta_t) + new_state
+                return (time + 1, emb_prev, prev_symbol, output_ta_t) + \
+                    new_state
 
-            unrolled_vars = tf.while_loop(
-                cond=lambda time, *_: time < time_steps,
-                body=_time_step,
-                loop_vars=(time, prev, output_ta) + tuple(state),
-            )
-            output_ta_final, state_final = unrolled_vars[2], unrolled_vars[3]
+            if self.run_level < 3:
+                unrolled_vars = tf.while_loop(
+                    cond=lambda time, *_: time < time_steps,
+                    body=_time_step,
+                    loop_vars=(time, prev, prev_symbol_dummy, output_ta) +
+                    tuple(state),
+                )
+            else:
+                unrolled_vars = tf.while_loop(
+                    cond=pred_cond,
+                    body=_time_step,
+                    loop_vars=(time, prev, prev_symbol_dummy, output_ta) +
+                    tuple(state),
+                )
+            output_ta_final, state_final = unrolled_vars[3], unrolled_vars[4]
 
             output_final = output_ta_final.pack()
             output_final.set_shape([int_time_steps, self.batch_size,
@@ -339,6 +407,7 @@ class TransNormModel(object):
         if not model_dir:
             model_dir = self.model_dir
         step_time, step_loss = 0.0, 0.0
+        loss_history = []
         with tf.Session(config=self.sess_conf) as sess:
             self.load_model(sess, None, model_dir)
 
@@ -353,8 +422,8 @@ class TransNormModel(object):
                 if step % steps_per_checkpoint == 0:
                     perplexity = math.expm1(step_loss) if loss < 300 else \
                         float('inf')
-                    print('{} : step {} : learning rate {:8.7f} '
-                          'step time {:3.2f} perplexity {:10.9f}'.format(
+                    print('{} : step {} : learning rate {:8.7f} : '
+                          'step time {:3.2f} : perplexity {:10.9f}'.format(
                               datetime.now().ctime(), step,
                               self.learning_rate.eval(), step_time, perplexity
                           ))
@@ -362,6 +431,9 @@ class TransNormModel(object):
                     self.saver.save(sess, ckpt_path,
                                     global_step=self.global_step)
                     step_time, step_loss = 0.0, 0.0
+
+                if len(loss_history) > 2 and step_loss > max(loss_history[-3:]):
+                    sess.run(self.learning_rate_decay_op)
 
     def test(self, num_examples, model_dir=None):
         """
@@ -371,7 +443,6 @@ class TransNormModel(object):
         if self.run_level != 2:
             raise ValueError('Current run level doesnt support testing.\n' +
                              'Check the flags `forward_only` and `predict`')
-        assert self.batch_size == 1
         if not model_dir:
             model_dir = self.model_dir
         evaluations = []
@@ -381,21 +452,23 @@ class TransNormModel(object):
         evals_int = tf.to_int32(evaluations)
         evals_int = tf.pack(evals_int)
 
+        num_iter = num_examples / self.batch_size
+
         hits, misses = 0, 0
         with tf.Session(config=self.sess_conf) as sess:
             coord = tf.train.Coordinator()
             threads = self.load_model(sess, coord, model_dir)
 
             try:
-                num_iter = 0
-                while num_iter < num_examples and not coord.should_stop():
+                step = 0
+                while step < num_iter and not coord.should_stop():
                     preds, targets = sess.run([evals_int, self.targets])
                     preds[preds == 0] = -1
                     seq_len_ind = np.sign(targets)
                     preds = preds * seq_len_ind
                     hits += (preds == 1).sum()
                     misses += (preds == -1).sum()
-                    num_iter += 1
+                    step += 1
             except Exception as e:
                 coord.request_stop(e)
 
@@ -403,6 +476,7 @@ class TransNormModel(object):
             coord.join(threads)
 
         print('Total Hits : {}\nTotal Misses : {}'.format(hits, misses))
+        print('Accuracy : {:f}'.format(float(hits) / (hits + misses)))
 
 
 def _get_variable(name, shape, wd=None):

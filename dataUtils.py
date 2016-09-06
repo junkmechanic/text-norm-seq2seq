@@ -104,7 +104,10 @@ class DataSource:
                 return len(ifi.readlines())
         deleteFiles([self.vocab_path])
         vocab = {}
-        for data_path in [self.train_path + '.inp', self.train_path + '.out']:
+        for data_path in [self.train_path + '.inp',
+                          self.train_path + '.out',
+                          self.dev_path + '.inp',
+                          self.dev_path + '.out']:
             with open(data_path) as f:
                 for line in f:
                     for token in line.split():
@@ -114,11 +117,6 @@ class DataSource:
         return len(vocab_list)
 
     def build_ids(self):
-
-        def iter_over(inp_filename, out_filename):
-            with open(inp_filename) as inp, open(out_filename) as out:
-                for inp_seq, out_seq in izip(inp, out):
-                    yield inp_seq.strip(), out_seq.strip()
 
         def format_sequence(sequence):
             return tf.train.FeatureList(
@@ -135,8 +133,8 @@ class DataSource:
                 return
             deleteFiles([target_path])
             writer = tf.python_io.TFRecordWriter(target_path)
-            for in_seq, out_seq in iter_over(set_type + '.inp',
-                                             set_type + '.out'):
+            for in_seq, out_seq in self.iter_over(set_type + '.inp',
+                                                  set_type + '.out'):
                 in_tokens = self.sentence_to_token_ids(in_seq, vocab)
                 out_tokens = self.sentence_to_token_ids(out_seq, vocab)
                 targets = out_tokens[1:] + [0]
@@ -149,6 +147,7 @@ class DataSource:
                         }))
                 writer.write(example.SerializeToString())
             writer.close()
+            print('Done writing {}.ids.bin'.format(set_type))
 
     def prepare_samples(self):
         sep = ' {} '.format(_SEP)
@@ -300,6 +299,12 @@ class DataSource:
             return vocab, rev_vocab
         else:
             raise ValueError("Vocabulary file %s not found.", vocab_path)
+
+    @staticmethod
+    def iter_over(inp_filename, out_filename):
+        with open(inp_filename) as inp, open(out_filename) as out:
+            for inp_seq, out_seq in izip(inp, out):
+                yield inp_seq.strip(), out_seq.strip()
 
     @staticmethod
     def sentence_to_token_ids(sentence, vocabulary):

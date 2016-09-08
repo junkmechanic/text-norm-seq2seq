@@ -406,34 +406,37 @@ class TransNormModel(object):
                              'Check the flags `forward_only` and `predict`')
         if not model_dir:
             model_dir = self.model_dir
-        step_time, step_loss = 0.0, 0.0
-        loss_history = []
+        ckpt_time, ckpt_loss = 0.0, 0.0
+        loss_history = [float('inf')]
         with tf.Session(config=self.sess_conf) as sess:
             self.load_model(sess, None, model_dir)
 
             # training loop
             while True:
                 start_time = time.time()
-                _, loss = sess.run([self.update_model, self.loss])
-                step_time += (time.time() - start_time) / steps_per_checkpoint
-                step_loss += loss / steps_per_checkpoint
+                _, step_loss = sess.run([self.update_model, self.loss])
+                ckpt_time += (time.time() - start_time) / steps_per_checkpoint
+                ckpt_loss += step_loss / steps_per_checkpoint
 
                 step = self.global_step.eval()
                 if step % steps_per_checkpoint == 0:
-                    perplexity = math.expm1(step_loss) if loss < 300 else \
+                    perplexity = math.expm1(ckpt_loss) if ckpt_loss < 300 else \
                         float('inf')
                     print('{} : step {} : learning rate {:8.7f} : '
-                          'step time {:3.2f} : perplexity {:10.9f}'.format(
+                          'time {:3.2f} : perplexity {:10.9f}'.format(
                               datetime.now().ctime(), step,
-                              self.learning_rate.eval(), step_time, perplexity
+                              self.learning_rate.eval(), ckpt_time, perplexity
                           ))
+
+                    if ckpt_loss > max(loss_history[-3:]):
+                        sess.run(self.learning_rate_decay_op)
+                    loss_history.append(ckpt_loss)
+
+                    # Save and reset
                     ckpt_path = os.path.join(model_dir, 'transNormModel.ckpt')
                     self.saver.save(sess, ckpt_path,
                                     global_step=self.global_step)
-                    step_time, step_loss = 0.0, 0.0
-
-                if len(loss_history) > 2 and step_loss > max(loss_history[-3:]):
-                    sess.run(self.learning_rate_decay_op)
+                    ckpt_time, ckpt_loss = 0.0, 0.0
 
     def test(self, num_examples, model_dir=None):
         """

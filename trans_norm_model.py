@@ -143,7 +143,8 @@ class TransNormModel(object):
             self.update_model = self.backpropagate()
 
         # saving the model
-        self.saver = tf.train.Saver(tf.all_variables())
+        self.saver = tf.train.Saver(tf.all_variables(),
+                                    keep_checkpoint_every_n_hours=2)
 
         self.sess_conf = tf.ConfigProto(
             allow_soft_placement=True,

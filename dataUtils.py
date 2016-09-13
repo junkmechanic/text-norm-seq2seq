@@ -46,6 +46,11 @@ class DataSource:
     `filter_vocab_test/train` are flags to indicate whether clean words would
     be filtered out (not considered) while building the dataset.
 
+    `num_shuffled_files` indicates the number of copies of the training set
+    would be made with shuffled indices to introduce randomness during the
+    training, since tf.train.shuffle_batch cannot be used with unknown size of
+    sequences.
+
     The members that are defined later are:
         aspell
 
@@ -53,7 +58,7 @@ class DataSource:
     def __init__(self, name="default", data_dir='./data', train_files=None,
                  test_files=None, train_ratio=1.0, dev_ratio=0.1, ngram=3,
                  use_vocab=None, seed=2016, filter_vocab_train=False,
-                 filter_vocab_test=True, reuse=False):
+                 filter_vocab_test=True, reuse=False, num_shuffled_files=0):
 
         self.name = name
         self.data_dir = os.path.join(data_dir, name)
@@ -74,6 +79,7 @@ class DataSource:
         self.filter_vocab_train = filter_vocab_train
         self.filter_vocab_test = filter_vocab_test
         self.reuse = reuse
+        self.num_shuffled_files = num_shuffled_files
 
         self.build_aspell()
         self.train_path = os.path.join(self.data_dir, 'train')
@@ -117,6 +123,7 @@ class DataSource:
         return len(vocab_list)
 
     def build_ids(self):
+        vocab, _ = self.initialize_vocabulary(self.vocab_path)
 
         def format_sequence(sequence):
             return tf.train.FeatureList(
@@ -126,15 +133,12 @@ class DataSource:
                 ]
             )
 
-        vocab, _ = self.initialize_vocabulary(self.vocab_path)
-        for set_type in [self.train_path, self.dev_path, self.test_path]:
-            target_path = set_type + '.ids.bin'
+        def generate_binary_data(target_path, iterable):
             if self.reuse and os.path.exists(target_path):
                 return
             deleteFiles([target_path])
             writer = tf.python_io.TFRecordWriter(target_path)
-            for in_seq, out_seq in self.iter_over(set_type + '.inp',
-                                                  set_type + '.out'):
+            for in_seq, out_seq in iterable:
                 in_tokens = self.sentence_to_token_ids(in_seq, vocab)
                 out_tokens = self.sentence_to_token_ids(out_seq, vocab)
                 targets = out_tokens[1:] + [0]
@@ -147,7 +151,26 @@ class DataSource:
                         }))
                 writer.write(example.SerializeToString())
             writer.close()
-            print('Done writing {}.ids.bin'.format(set_type))
+            print('Done writing {}'.format(target_path))
+
+        # Training set
+        if self.num_shuffled_files > 0:
+            all_data = list(self.iter_over(self.train_path + '.inp',
+                                           self.train_path + '.out'))
+            for k in range(self.num_shuffled_files):
+                random.shuffle(all_data)
+                generate_binary_data(self.train_path + '.ids.bin.' + str(k),
+                                     all_data)
+        else:
+            generate_binary_data(self.train_path + '.ids.bin',
+                                 self.iter_over(self.train_path + '.inp',
+                                                self.train_path + '.out'))
+
+        # Dev and Test set
+        for set_type in [self.dev_path, self.test_path]:
+            generate_binary_data(set_type + '.ids.bin',
+                                 self.iter_over(set_type + '.inp',
+                                                set_type + '.out'))
 
     def prepare_samples(self):
         sep = ' {} '.format(_SEP)

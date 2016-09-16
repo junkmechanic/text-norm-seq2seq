@@ -51,9 +51,6 @@ class DataSource:
     training, since tf.train.shuffle_batch cannot be used with unknown size of
     sequences.
 
-    The members that are defined later are:
-        aspell
-
     """
     def __init__(self, name="default", data_dir='./data', train_files=None,
                  test_files=None, train_ratio=1.0, dev_ratio=0.1, ngram=3,
@@ -80,11 +77,11 @@ class DataSource:
         self.filter_vocab_test = filter_vocab_test
         self.reuse = reuse
         self.num_shuffled_files = num_shuffled_files
-
-        self.build_aspell()
         self.train_path = os.path.join(self.data_dir, 'train')
         self.dev_path = os.path.join(self.data_dir, 'dev')
         self.test_path = os.path.join(self.data_dir, 'test')
+
+        self.aspell = self.build_aspell()
         self.prepare_samples()
         if not use_vocab:
             self.vocab_size = self.build_vocabulary()
@@ -93,12 +90,6 @@ class DataSource:
                 self.vocab_size = len(ifi.readlines())
         self.build_ids()
         self.save_state()
-
-    def build_aspell(self):
-        self.aspell = []
-        with open('./dict/aspell.dict') as dfile:
-            for line in dfile:
-                self.aspell.append(line.strip().lower().decode('utf-8'))
 
     def save_state(self):
         attributes = {k: v for k, v in vars(self).items() if k != 'aspell'}
@@ -110,10 +101,11 @@ class DataSource:
                 return len(ifi.readlines())
         deleteFiles([self.vocab_path])
         vocab = {}
-        for data_path in [self.train_path + '.inp',
-                          self.train_path + '.out',
-                          self.dev_path + '.inp',
-                          self.dev_path + '.out']:
+        vocab_files = [self.train_path + '.inp',
+                       self.train_path + '.out',
+                       self.dev_path + '.inp',
+                       self.dev_path + '.out']
+        for data_path in [fl for fl in vocab_files if os.path.exists(fl)]:
             with open(data_path) as f:
                 for line in f:
                     for token in line.split():
@@ -154,23 +146,25 @@ class DataSource:
             print('Done writing {}'.format(target_path))
 
         # Training set
-        if self.num_shuffled_files > 0:
-            all_data = list(self.iter_over(self.train_path + '.inp',
-                                           self.train_path + '.out'))
-            for k in range(self.num_shuffled_files):
-                random.shuffle(all_data)
-                generate_binary_data(self.train_path + '.ids.bin.' + str(k),
-                                     all_data)
-        else:
-            generate_binary_data(self.train_path + '.ids.bin',
-                                 self.iter_over(self.train_path + '.inp',
-                                                self.train_path + '.out'))
+        if os.path.exists(self.train_path + '.inp'):
+            if self.num_shuffled_files > 0:
+                all_data = list(self.iter_over(self.train_path + '.inp',
+                                               self.train_path + '.out'))
+                for k in range(self.num_shuffled_files):
+                    random.shuffle(all_data)
+                    generate_binary_data(self.train_path + '.ids.bin.' + str(k),
+                                         all_data)
+            else:
+                generate_binary_data(self.train_path + '.ids.bin',
+                                     self.iter_over(self.train_path + '.inp',
+                                                    self.train_path + '.out'))
 
         # Dev and Test set
         for set_type in [self.dev_path, self.test_path]:
-            generate_binary_data(set_type + '.ids.bin',
-                                 self.iter_over(set_type + '.inp',
-                                                set_type + '.out'))
+            if os.path.exists(set_type + '.inp'):
+                generate_binary_data(set_type + '.ids.bin',
+                                     self.iter_over(set_type + '.inp',
+                                                    set_type + '.out'))
 
     def prepare_samples(self):
         sep = ' {} '.format(_SEP)
@@ -195,74 +189,90 @@ class DataSource:
         inp_test = self.test_path + '.inp'
         out_test = self.test_path + '.out'
 
-        exist = [os.path.exists(f) for f in [
-            inp_train, out_train, inp_dev, out_dev, inp_test, out_test
-        ]]
-        if self.reuse and all(exist):
-            return
-        deleteFiles([inp_train, out_train, inp_dev, out_dev, inp_test,
-                     out_test])
-
         # Training Set
-        for idx in shuffled_indices[:num_train_samples]:
-            for in_win, out in zip(
-                self.context_window(train_samples[idx]['input'], self.ngram),
-                train_samples[idx]['output']
-            ):
-                inp = in_win[self.ngram // 2].lower()
-                out = [_GO] + list(out.lower().replace(' ', '_')) + [_EOS]
-                # If the output is blank, then we ignore the sample since we do
-                # not want to consider such cases for training. Example if the
-                # input was ['b', 'cuz'] the output will be ['because', ''].
-                # For now, the model is not being trained to recognize that.
-                if not self.valid_token(inp) or len(out) == 0:
-                    continue
-                if self.filter_vocab_train and inp in self.aspell:
-                    continue
-                writeToFile(inp_train,
-                            sep.join(self.convert_format(in_win)) + '\n')
-                # The output sequence might contain space implying that the
-                # normalized output was a set of two words. This space is
-                # represented as an underscore (`_`) because space is used as a
-                # delimited in the input format.
-                # Later while decoding, the output of the model should be
-                # processed to replace underscores with spaces.
-                writeToFile(out_train, ' '.join(out) + '\n')
+        if self.reuse and all([os.path.exists(f) for f in [inp_train,
+                                                           out_train]]):
+            pass
+        else:
+            deleteFiles([inp_train, out_train])
+            for idx in shuffled_indices[:num_train_samples]:
+                for in_win, out in zip(
+                    self.context_window(train_samples[idx]['input'],
+                                        self.ngram),
+                    train_samples[idx]['output']
+                ):
+                    inp = in_win[self.ngram // 2].lower()
+                    out = [_GO] + list(out.lower().replace(' ', '_')) + [_EOS]
+                    # If the output is blank, then we ignore the sample since we
+                    # do not want to consider such cases for training. Example
+                    # if the input was ['b', 'cuz'] the output will be
+                    # ['because', ''].  For now, the model is not being trained
+                    # to recognize that.
+                    if not self.valid_token(inp) or len(out) == 0:
+                        continue
+                    if self.filter_vocab_train and inp in self.aspell:
+                        continue
+                    writeToFile(inp_train,
+                                sep.join(self.convert_format(in_win)) + '\n')
+                    # The output sequence might contain space implying that the
+                    # normalized output was a set of two words. This space is
+                    # represented as an underscore (`_`) because space is used
+                    # as a delimiter in the input format.  Later while decoding,
+                    # the output of the model should be processed to replace
+                    # underscores with spaces.
+                    writeToFile(out_train, ' '.join(out) + '\n')
 
         # Dev Set
-        for idx in shuffled_indices[num_train_samples:num_trn_dev_samples]:
-            for in_win, out in zip(
-                self.context_window(train_samples[idx]['input'], self.ngram),
-                train_samples[idx]['output']
-            ):
-                inp = in_win[self.ngram // 2].lower()
-                out = [_GO] + list(out.lower().replace(' ', '_')) + [_EOS]
-                if not self.valid_token(inp) or len(out) == 0:
-                    continue
-                if self.filter_vocab_train and inp in self.aspell:
-                    continue
-
-                writeToFile(inp_dev, sep.join(self.convert_format(in_win)) +
-                            '\n')
-                writeToFile(out_dev, ' '.join(out) + '\n')
+        if self.reuse and all([os.path.exists(f) for f in [inp_dev,
+                                                           out_dev]]):
+            pass
+        else:
+            deleteFiles([inp_dev, out_dev])
+            for idx in shuffled_indices[num_train_samples:num_trn_dev_samples]:
+                for in_win, out in zip(
+                    self.context_window(train_samples[idx]['input'],
+                                        self.ngram),
+                    train_samples[idx]['output']
+                ):
+                    inp = in_win[self.ngram // 2].lower()
+                    out = [_GO] + list(out.lower().replace(' ', '_')) + [_EOS]
+                    if not self.valid_token(inp) or len(out) == 0:
+                        continue
+                    if self.filter_vocab_train and inp in self.aspell:
+                        continue
+                    writeToFile(inp_dev,
+                                sep.join(self.convert_format(in_win)) + '\n')
+                    writeToFile(out_dev, ' '.join(out) + '\n')
 
         # Test Set
-        test_samples.extend(train_samples[num_trn_dev_samples:])
-        for sample in test_samples:
-            for in_win, out in zip(
-                self.context_window(sample['input'], self.ngram),
-                sample['output']
-            ):
-                inp = in_win[self.ngram // 2].lower()
-                out = [_GO] + list(out.lower().replace(' ', '_')) + [_EOS]
-                if not self.valid_token(inp) or len(out) == 0:
-                    continue
-                if self.filter_vocab_test and inp in self.aspell:
-                    continue
+        if self.reuse and all([os.path.exists(f) for f in [inp_test,
+                                                           out_test]]):
+            pass
+        else:
+            deleteFiles([inp_test, out_test])
+            test_samples.extend(train_samples[num_trn_dev_samples:])
+            for sample in test_samples:
+                for in_win, out in zip(
+                    self.context_window(sample['input'], self.ngram),
+                    sample['output']
+                ):
+                    inp = in_win[self.ngram // 2].lower()
+                    out = [_GO] + list(out.lower().replace(' ', '_')) + [_EOS]
+                    if not self.valid_token(inp) or len(out) == 0:
+                        continue
+                    if self.filter_vocab_test and inp in self.aspell:
+                        continue
+                    writeToFile(inp_test,
+                                sep.join(self.convert_format(in_win)) + '\n')
+                    writeToFile(out_test, ' '.join(out) + '\n')
 
-                writeToFile(inp_test, sep.join(self.convert_format(in_win)) +
-                            '\n')
-                writeToFile(out_test, ' '.join(out) + '\n')
+    @staticmethod
+    def build_aspell():
+        aspell = []
+        with open('./dict/aspell.dict') as dfile:
+            for line in dfile:
+                aspell.append(line.strip().lower().decode('utf-8'))
+        return aspell
 
     @staticmethod
     def valid_token(token):

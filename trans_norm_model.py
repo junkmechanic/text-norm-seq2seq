@@ -36,6 +36,7 @@ class TransNormModel(object):
         forward_only=False,
         predict=False,
         model_dir='./model',
+        name='transNormModel',
         eos_idx=8,
         max_pred_length=50,
     ):
@@ -82,6 +83,7 @@ class TransNormModel(object):
         self.max_gradient_norm = max_gradient_norm
         self.eos_idx = eos_idx
         self.max_pred_length = max_pred_length
+        self.name = name
         if not forward_only and predict:
             raise ValueError('!forward_only and predict are mutually exclusive')
         if not forward_only:
@@ -171,7 +173,8 @@ class TransNormModel(object):
                 single_cell = tf.nn.rnn_cell.GRUCell(self.cell_size)
             if self.num_layers > 1:
                 cell = tf.nn.rnn_cell.MultiRNNCell([single_cell] *
-                                                   self.num_layers)
+                                                   self.num_layers,
+                                                   state_is_tuple=True)
             else:
                 cell = single_cell
             lengths = get_sequence_lengths(self.embedded_encoder_input, scope)
@@ -193,7 +196,8 @@ class TransNormModel(object):
                 single_cell = tf.nn.rnn_cell.GRUCell(self.cell_size)
             if self.num_layers > 1:
                 cell = tf.nn.rnn_cell.MultiRNNCell([single_cell] *
-                                                   self.num_layers)
+                                                   self.num_layers,
+                                                   state_is_tuple=True)
             else:
                 cell = single_cell
             # The output from the decoder RNN needs to pass through fully
@@ -401,7 +405,8 @@ class TransNormModel(object):
         threads = tf.train.start_queue_runners(session, coordinator)
         return threads
 
-    def learn(self, steps_per_checkpoint=200, model_dir=None):
+    def learn(self, steps_per_checkpoint=200, model_dir=None,
+              new_learning_rate=None, reset_global_step=False):
         if self.run_level > 1:
             raise ValueError('Current run level doesnt support training.\n' +
                              'Check the flags `forward_only` and `predict`')
@@ -411,6 +416,10 @@ class TransNormModel(object):
         loss_history = [float('inf')]
         with tf.Session(config=self.sess_conf) as sess:
             self.load_model(sess, None, model_dir)
+            if new_learning_rate:
+                sess.run(self.learning_rate.assign(float(new_learning_rate)))
+            if reset_global_step:
+                sess.run(self.global_step.assign(0))
 
             # training loop
             while True:
@@ -434,7 +443,7 @@ class TransNormModel(object):
                     loss_history.append(ckpt_loss)
 
                     # Save and reset
-                    ckpt_path = os.path.join(model_dir, 'transNormModel.ckpt')
+                    ckpt_path = os.path.join(model_dir, self.name + '.ckpt')
                     self.saver.save(sess, ckpt_path,
                                     global_step=self.global_step)
                     ckpt_time, ckpt_loss = 0.0, 0.0

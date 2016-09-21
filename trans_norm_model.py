@@ -144,6 +144,12 @@ class TransNormModel(object):
         if self.run_level < 2:
             self.update_model = self.backpropagate()
 
+        # building summary op for tracking variables
+        summaries = tf.get_collection(tf.GraphKeys.SUMMARIES)
+        for var in tf.trainable_variables():
+            summaries.append(tf.histogram_summary(var.op.name, var))
+        self.summary_op = tf.merge_summary(summaries)
+
         # saving the model
         self.saver = tf.train.Saver(tf.all_variables(),
                                     keep_checkpoint_every_n_hours=2)
@@ -360,7 +366,8 @@ class TransNormModel(object):
                          name="loss_computation"):
             # the targets are just decoder_inputs shifted by 1
             # shifted = tf.slice(self.decoder_seq, begin=[0, 1], size=[-1, -1])
-            # zeros = tf.zeros([self.batch_size, 1], dtype=self.decoder_seq.dtype)
+            # zeros = tf.zeros([self.batch_size, 1],
+            #                  dtype=self.decoder_seq.dtype)
             # targets = tf.concat(1, [shifted, zeros])
             # the targets need to be in one-hot vector form.
             # tf.one_hot returns a tensor with type float32 by default
@@ -378,7 +385,9 @@ class TransNormModel(object):
             cross_entropy /= tf.reduce_sum(seq_indicators, reduction_indices=1)
 
             # cost over the entire batch
-            return tf.reduce_mean(cross_entropy)
+            batch_loss = tf.reduce_mean(cross_entropy)
+            tf.scalar_summary('batch_loss', batch_loss)
+            return batch_loss
 
     def backpropagate(self):
         with tf.op_scope([self.learning_rate, self.max_gradient_norm,
@@ -389,6 +398,9 @@ class TransNormModel(object):
             clipped_grads, gnorm = tf.clip_by_global_norm(
                 grads, self.max_gradient_norm
             )
+            for grad, var in zip(clipped_grads, vars):
+                if grad is not None:
+                    tf.histogram_summary(var.op.name + '/gradients', grad)
             return self.optimizer.apply_gradients(zip(clipped_grads, vars),
                                                   global_step=self.global_step)
 
@@ -403,6 +415,7 @@ class TransNormModel(object):
                 datetime.now().ctime()))
             session.run(tf.initialize_all_variables())
         threads = tf.train.start_queue_runners(session, coordinator)
+        self.summary_writer = tf.train.SummaryWriter(model_dir, session.graph)
         return threads
 
     def learn(self, steps_per_checkpoint=200, model_dir=None,
@@ -441,6 +454,9 @@ class TransNormModel(object):
                     if ckpt_loss > max(loss_history[-3:]):
                         sess.run(self.learning_rate_decay_op)
                     loss_history.append(ckpt_loss)
+
+                    summary_str = sess.run(self.summary_op)
+                    self.summary_writer.add_summary(summary_str, step)
 
                     # Save and reset
                     ckpt_path = os.path.join(model_dir, self.name + '.ckpt')

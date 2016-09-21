@@ -20,14 +20,14 @@ def normalize(samples):
     inp_seq_batch = tf.placeholder(tf.int64, shape=[batch_size, None])
     out_seq_batch = tf.placeholder(tf.int64, shape=[batch_size, None])
     targets_batch = tf.placeholder(tf.int64, shape=[batch_size, None])
-    model_dir = '/home/ankur/devbench/tf-deep/seq_norm_main/scrap/test_summary/'
+    model_dir = '/home/ankur/devbench/tf-deep/seq_norm_main/train/'
     model = TransNormModel(
         inp_seq_batch,
         out_seq_batch,
         targets_batch,
         dsource.vocab_size,
         batch_size,
-        cell_size=64,
+        cell_size=1024,
         num_layers=3,
         max_gradient_norm=5.0,
         learning_rate=0.0005,

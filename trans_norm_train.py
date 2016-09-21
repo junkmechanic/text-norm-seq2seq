@@ -11,6 +11,7 @@ tf.app.flags.DEFINE_boolean("test", False,
 FLAGS = tf.app.flags.FLAGS
 
 train_files = [
+    './data/clear_tweets.json',
     './data/train_data.json',
 ]
 
@@ -33,7 +34,7 @@ def main(_):
 
     dsource = DataSource(
         train_files=train_files,
-        # name='clean',
+        name='mixed',
         dev_ratio=0.0,
         test_files=test_files,
         use_vocab='./data/default/',
@@ -74,27 +75,28 @@ def main(_):
         name="sequence_batch"
     )
 
-    model = TransNormModel(
-        inp_seq_batch,
-        out_seq_batch,
-        targets_batch,
-        dsource.vocab_size,
-        batch_size,
-        cell_size=64,
-        num_layers=3,
-        max_gradient_norm=5.0,
-        learning_rate=learning_rate,
-        learning_rate_decay_factor=0.99,
-        forward_only=forward_only,
-        predict=predict,
-        model_dir='/home/ankur/devbench/tf-deep/seq_norm_main/train/',
-        name='transNormModel_pretrained',
-        eos_idx=eos_idx,
-    )
+    with tf.device('/gpu:1'):
+        model = TransNormModel(
+            inp_seq_batch,
+            out_seq_batch,
+            targets_batch,
+            dsource.vocab_size,
+            batch_size,
+            cell_size=1024,
+            num_layers=3,
+            max_gradient_norm=5.0,
+            learning_rate=learning_rate,
+            learning_rate_decay_factor=0.99,
+            forward_only=forward_only,
+            predict=predict,
+            model_dir='/home/ankur/devbench/tf-deep/seq_norm_main/train/',
+            name='transNormModel_mixed_3L_1024U',
+            eos_idx=eos_idx,
+        )
 
     if not FLAGS.test:
-        # model.learn()
-        model.learn(new_learning_rate=learning_rate, reset_global_step=True)
+        model.learn()
+        # model.learn(new_learning_rate=learning_rate, reset_global_step=True)
     else:
         model.test(num_test_examples)
 

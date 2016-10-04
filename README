@@ -1,0 +1,39 @@
+README for Normalization System using Sequence to Sequence Learning
+
+By Ankur Khanna (ankur)
+
+Following is the description of the system build by me for Normalization of
+Noisy User-generated text (like tweets, youtube comments etc).
+
+All the source code files are version controlled using git. First, let's look at
+some of the important files:
+
+data/
+    train_data.json                     -- benchmark training data
+    test_truth.json                     -- benchmark test data
+    clear_tweets.json                   -- tweets with no OOVs
+trans_norm_train.py
+# tf_normalize.py
+tf_normalize_merge.py
+tf_normalize_skel.py
+
+The main script to train the mold is './trans_norm_model.py'. If you supply it
+with the command line flag '--test' then it will run the model on the test set.
+
+The script './tf_normalize_skel.py' is used to run the model on the test set and
+create an output file that would be used by 'tf_normalize_merge.py'. The suffix
+'skel' stands for skeleton because it does not run the entire normalization
+system but only the prediction part where the deep learning model is used.
+
+The script './tf_normalize_merge.py' then uses the output of the skeleton script
+to merge it with the rule based modules.
+
+The reason why the two modules (prediciton and rule-based) are run separately is
+becasue the prediction module takes a long time to load the model and then
+predict the output. And often, you may want to make a small change in the rule-
+based module and check the change in the output. Hence, it is convenient to just
+save the output of the prediction as the skeleton output and then run the rule-
+based module on top of it.
+
+All other files are older versions that were used for either inspiration
+(shamelessly copying) or running/testing/tuning the model.

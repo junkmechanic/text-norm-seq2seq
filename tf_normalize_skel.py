@@ -1,9 +1,10 @@
+import os
 import numpy as np
 import tensorflow as tf
 from eval import evaluate
 from trans_norm_model import TransNormModel
 from dataUtils import DataSource
-from utilities import loadJSON, saveJSON
+from utilities import loadJSON, saveJSON, PATHS
 
 
 def normalize(samples):
@@ -20,7 +21,7 @@ def normalize(samples):
     inp_seq_batch = tf.placeholder(tf.int64, shape=[batch_size, None])
     out_seq_batch = tf.placeholder(tf.int64, shape=[batch_size, None])
     targets_batch = tf.placeholder(tf.int64, shape=[batch_size, None])
-    model_dir = '/home/ankur/devbench/tf-deep/seq_norm_main/train/'
+    model_dir = os.path.join(PATHS['root'] + 'train/')
     model = TransNormModel(
         inp_seq_batch,
         out_seq_batch,

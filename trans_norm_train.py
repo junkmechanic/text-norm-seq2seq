@@ -1,6 +1,7 @@
+import os
 from glob import glob
 import tensorflow as tf
-from utilities import loadJSON
+from utilities import loadJSON, PATHS
 
 from dataUtils import DataSource
 from trans_norm_model import TransNormModel
@@ -89,7 +90,7 @@ def main(_):
             learning_rate_decay_factor=0.99,
             forward_only=forward_only,
             predict=predict,
-            model_dir='/home/ankur/devbench/tf-deep/seq_norm_main/train/',
+            model_dir=os.path.join(PATHS['root'] + 'train/'),
             name='transNormModel_mixed_3L_1024U',
             eos_idx=eos_idx,
         )

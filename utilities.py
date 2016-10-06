@@ -8,7 +8,36 @@ NEW_LINE = '\n'
 BUFFER_MAX = 5000
 
 PATHS = {
-    'root': '/home/ankur/devbench/tf-deep/seq_norm_main/'
+    'root': '/home/ankur/devbench/tf-deep/seq_norm_main/',
+}
+
+VARS = {
+
+    # This defines the extent of the context used for each input.
+    # So if the input sequence is [x, y, z, w] and ngam=3, then the first input
+    # to the encoder will be [_CPADS, x, y]; the second input to the encoder
+    # will be [x, y, z]; the third [y, z, w] and so on. Please check
+    # dataUtils.py for more info on 'padding start' (_CPADS) and 'padding end'
+    # (_CPADE)
+    'ngram': 3,
+
+    # Size of the RNN layer
+    'cell_size': 1024,
+
+    # Minibatch Size
+    'batch_size': 64,
+
+    # number of RNN layers
+    'num_layers': 3,
+
+    # the global max of the norm of the gradient used for clipping during
+    # backpropagation
+    'max_gradient_norm': 5.0,
+
+    'learning_rate': 0.0005,
+
+    'learning_rate_decay_factor': 0.99,
+
 }
 
 

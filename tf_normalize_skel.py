@@ -4,11 +4,11 @@ import tensorflow as tf
 from eval import evaluate
 from trans_norm_model import TransNormModel
 from dataUtils import DataSource
-from utilities import loadJSON, saveJSON, PATHS
+from utilities import loadJSON, saveJSON, PATHS, VARS
 
 
 def normalize(samples):
-    ngram = 3
+    ngram = VARS['ngram']
     sep = ' _S_ '
     batch_size = 1
     forward_only = predict = True
@@ -28,11 +28,11 @@ def normalize(samples):
         targets_batch,
         dsource.vocab_size,
         batch_size,
-        cell_size=1024,
-        num_layers=3,
-        max_gradient_norm=5.0,
-        learning_rate=0.0005,
-        learning_rate_decay_factor=0.99,
+        cell_size=VARS['cell_size'],
+        num_layers=VARS['num_layers'],
+        max_gradient_norm=VARS['max_gradient_norm'],
+        learning_rate=VARS['learning_rate'],
+        learning_rate_decay_factor=VARS['learning_rate_decay_factor'],
         forward_only=forward_only,
         predict=predict,
         model_dir=model_dir,

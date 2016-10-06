@@ -37,3 +37,33 @@ based module on top of it.
 
 All other files are older versions that were used for either inspiration
 (shamelessly copying) or running/testing/tuning the model.
+
+To run the scripts, the first thing you need to do is to change the directory
+name in the PATHS dictionary for the key 'root'. It should properly reflect the
+full name of the root of this library.
+
+Following is some information on individual scripts:
+
+trans_norm_train.py
+    This script trains the sequence to sequence model for normalization. The
+    first thing it does is preprocess the data from the train and test files to
+    convert it into a binary format which is easier to feed to TensorFlow. You
+    can change the options to change the way the data is preprocessed. To do
+    that, change the arguments given to the 'DataSource' object during
+    initialization. You can refer to the class description in 'dataUtils.py'
+    for more details on all the options available.
+
+    Next, the learning model is initialized. You can tune the model parameters
+    by changing the values given to the 'TransNormModel' object. I would advise
+    you to change these values in the VARS dictionary in 'utilities.py'.
+
+    Depending on whether the commandline option '--test' was supplied, the model
+    is either trained or used for prediction on test set. The test set prediction
+    is on a per word basis including words in the vocabulary. So it should not
+    be a surprise that it is a high value. If you want to check the actual
+    performance of the system for Normalization, you should run the scripts
+    'tf_normalize_skel' and 'tf_normalize_merge' as explained earlier.
+
+    The option '--test' is used to indicate that the model should use the
+    provided test files and run prediction on them. So you can replace the files
+    with development set files too.

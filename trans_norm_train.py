@@ -1,7 +1,7 @@
 import os
 from glob import glob
 import tensorflow as tf
-from utilities import loadJSON, PATHS
+from utilities import loadJSON, PATHS, VARS
 
 from dataUtils import DataSource
 from trans_norm_model import TransNormModel
@@ -20,8 +20,6 @@ test_files = [
     './data/test_truth.json',
 ]
 
-learning_rate = 0.0005
-
 
 def main(_):
     if FLAGS.test:
@@ -29,7 +27,7 @@ def main(_):
         forward_only = True
         num_test_examples = sum([len(loadJSON(tfile)) for tfile in test_files])
     else:
-        batch_size = 64
+        batch_size = VARS['batch_size']
         forward_only = False
     predict = False
 
@@ -83,11 +81,11 @@ def main(_):
             targets_batch,
             dsource.vocab_size,
             batch_size,
-            cell_size=1024,
-            num_layers=3,
-            max_gradient_norm=5.0,
-            learning_rate=learning_rate,
-            learning_rate_decay_factor=0.99,
+            cell_size=VARS['cell_size'],
+            num_layers=VARS['num_layers'],
+            max_gradient_norm=VARS['max_gradient_norm'],
+            learning_rate=VARS['learning_rate'],
+            learning_rate_decay_factor=VARS['learning_rate_decay_factor'],
             forward_only=forward_only,
             predict=predict,
             model_dir=os.path.join(PATHS['root'] + 'train/'),
@@ -97,6 +95,9 @@ def main(_):
 
     if not FLAGS.test:
         model.learn()
+        # the function learn() can also be used in the way called below with the
+        # extra parameters. This is used when you want to coninue training a
+        # model that has already been (pre-)trained in a different dataset.
         # model.learn(new_learning_rate=learning_rate, reset_global_step=True)
     else:
         model.test(num_test_examples)

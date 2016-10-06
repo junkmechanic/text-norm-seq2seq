@@ -8,7 +8,7 @@ from itertools import izip
 
 import tensorflow as tf
 from tensorflow.python.platform import gfile
-from utilities import deleteFiles, writeToFile, saveJSON, loadJSON
+from utilities import deleteFiles, writeToFile, saveJSON, loadJSON, VARS
 
 _PAD = "_PAD"
 _GO = "_GO"
@@ -38,6 +38,9 @@ class DataSource:
     `dev_ratio` defines how much of the train data will be separated for
     development set.
 
+    `ngram` indicates the window size for each input. Ideally it should be an
+    odd number so that the main word is in the centre of the ngram context
+
     `use_vocab` lets you provide a path to a vocabulary. If not specified, a
     vocabulary will be created from the data provided in its own 'data_dir'.
     The value of `use_vocab` should be the dir in which the vocab files exist.
@@ -53,7 +56,7 @@ class DataSource:
 
     """
     def __init__(self, name="default", data_dir='./data', train_files=None,
-                 test_files=None, train_ratio=1.0, dev_ratio=0.1, ngram=3,
+                 test_files=None, train_ratio=1.0, dev_ratio=0.1, ngram=None,
                  use_vocab=None, seed=2016, filter_vocab_train=False,
                  filter_vocab_test=True, reuse=False, num_shuffled_files=0):
 
@@ -70,7 +73,7 @@ class DataSource:
         self.seed = seed
         self.train_ratio = train_ratio
         self.dev_ratio = dev_ratio
-        self.ngram = ngram
+        self.ngram = ngram if ngram else VARS['ngram']
         self.vocab_path = os.path.join(use_vocab, 'vocab') if use_vocab \
             else os.path.join(self.data_dir, 'vocab')
         self.filter_vocab_train = filter_vocab_train

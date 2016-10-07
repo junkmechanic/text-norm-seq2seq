@@ -68,6 +68,12 @@ trans_norm_train.py
     provided test files and run prediction on them. So you can replace the files
     with development set files too.
 
+    The option '--gpu' can be used to specify which GPU should be used to load
+    the model's graph onto. This can be helpful when you want to train multiple
+    models, each with a different set of parameters. This is because the models
+    tend to take up the entire memory on a single GPU, specially if the model
+    has a large number of parameters.
+
 tf_normalize_skel.py
     This script, as mentioned earlier, should be used to run the trained model
     on the test set, or any set for that matter. There is a single filter used
@@ -85,6 +91,10 @@ tf_normalize_skel.py
     vocab/predicted by the pipeline' or 'of all the words that were predicted by
     the model, how many were correctly predicted' etc. In such cases, the flag
     value can be used to filter the results.
+
+    The option '--gpu' can be used to specify which GPU should be used to load
+    the model's graph onto. This can be helpful when you want to train model(s)
+    on a GPU(s) and test the performance of another on a different GPU.
 
 tf_normalize_merge.py
     This is the final script that should be run after the skeleton script

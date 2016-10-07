@@ -49,10 +49,9 @@ class DataSource:
     `filter_vocab_test/train` are flags to indicate whether clean words would
     be filtered out (not considered) while building the dataset.
 
-    `num_shuffled_files` indicates the number of copies of the training set
-    would be made with shuffled indices to introduce randomness during the
-    training, since tf.train.shuffle_batch cannot be used with unknown size of
-    sequences.
+    `num_shuffled_files` indicates the number of copies of the training set made
+    with shuffled indices to introduce randomness during the training, since
+    tf.train.shuffle_batch cannot be used with unknown size of sequences.
 
     """
     def __init__(self, name="default", data_dir='./data', train_files=None,

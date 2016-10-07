@@ -8,6 +8,9 @@ from trans_norm_model import TransNormModel
 
 tf.app.flags.DEFINE_boolean("test", False,
                             "Set to True for testing the model.")
+tf.app.flags.DEFINE_integer("gpu", 0,
+                            "Index of the GPU to be used for creating the "
+                            "graph of the model")
 
 FLAGS = tf.app.flags.FLAGS
 
@@ -22,6 +25,11 @@ test_files = [
 
 
 def main(_):
+    if FLAGS.gpu < 0 or FLAGS.gpu > VARS['num_gpus'] - 1:
+        raise ValueError("The index of the GPU should be between 0 and "
+                         "{}".format(VARS['num_gpus'] - 1))
+    else:
+        gpu_device = '/gpu:{}'.format(FLAGS.gpu)
     if FLAGS.test:
         batch_size = 1
         forward_only = True
@@ -38,7 +46,7 @@ def main(_):
         test_files=test_files,
         use_vocab='./data/default/',
         reuse=True,
-        num_shuffled_files=3
+        num_shuffled_files=VARS['num_shuffled_files'],
     )
     vocab, _ = DataSource.initialize_vocabulary(dsource.vocab_path)
     eos_idx = vocab['_EOS']
@@ -74,7 +82,7 @@ def main(_):
         name="sequence_batch"
     )
 
-    with tf.device('/gpu:1'):
+    with tf.device(gpu_device):
         model = TransNormModel(
             inp_seq_batch,
             out_seq_batch,

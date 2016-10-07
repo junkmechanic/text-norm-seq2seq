@@ -6,8 +6,14 @@ from trans_norm_model import TransNormModel
 from dataUtils import DataSource
 from utilities import loadJSON, saveJSON, PATHS, VARS
 
+tf.app.flags.DEFINE_integer("gpu", 0,
+                            "Index of the GPU to be used for creating the "
+                            "graph of the model")
 
-def normalize(samples):
+FLAGS = tf.app.flags.FLAGS
+
+
+def normalize(samples, gpu_device):
     ngram = VARS['ngram']
     sep = ' _S_ '
     batch_size = 1
@@ -22,22 +28,23 @@ def normalize(samples):
     out_seq_batch = tf.placeholder(tf.int64, shape=[batch_size, None])
     targets_batch = tf.placeholder(tf.int64, shape=[batch_size, None])
     model_dir = os.path.join(PATHS['root'] + 'train/')
-    model = TransNormModel(
-        inp_seq_batch,
-        out_seq_batch,
-        targets_batch,
-        dsource.vocab_size,
-        batch_size,
-        cell_size=VARS['cell_size'],
-        num_layers=VARS['num_layers'],
-        max_gradient_norm=VARS['max_gradient_norm'],
-        learning_rate=VARS['learning_rate'],
-        learning_rate_decay_factor=VARS['learning_rate_decay_factor'],
-        forward_only=forward_only,
-        predict=predict,
-        model_dir=model_dir,
-        eos_idx=eos_idx,
-    )
+    with tf.device(gpu_device):
+        model = TransNormModel(
+            inp_seq_batch,
+            out_seq_batch,
+            targets_batch,
+            dsource.vocab_size,
+            batch_size,
+            cell_size=VARS['cell_size'],
+            num_layers=VARS['num_layers'],
+            max_gradient_norm=VARS['max_gradient_norm'],
+            learning_rate=VARS['learning_rate'],
+            learning_rate_decay_factor=VARS['learning_rate_decay_factor'],
+            forward_only=forward_only,
+            predict=predict,
+            model_dir=model_dir,
+            eos_idx=eos_idx,
+        )
     sess = tf.Session(config=model.sess_conf)
     model.load_model(sess, None, model.model_dir)
 
@@ -91,8 +98,17 @@ def normalize(samples):
     )
 
 
-if __name__ == '__main__':
+def main(_):
+    if FLAGS.gpu < 0 or FLAGS.gpu > VARS['num_gpus'] - 1:
+        raise ValueError("The index of the GPU should be between 0 and "
+                         "{}".format(VARS['num_gpus'] - 1))
+    else:
+        gpu_device = '/gpu:{}'.format(FLAGS.gpu)
     samples = loadJSON('./data/test_truth.json')
-    normalize(samples)
+    normalize(samples, gpu_device)
     saveJSON(samples, './data/test_out_only_oov.json')
     evaluate(samples, './data/norm_errors_only_oov.json')
+
+
+if __name__ == '__main__':
+    tf.app.run()

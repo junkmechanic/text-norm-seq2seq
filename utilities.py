@@ -38,6 +38,14 @@ VARS = {
 
     'learning_rate_decay_factor': 0.99,
 
+    # no. of gpus that can be used separately for training different models
+    # This should only be changed if GPUs are either added or removed from the
+    # server.
+    'num_gpus': 4,
+
+    # number of shuffled files created for training.
+    # This increases the randomness as the number goes higher.
+    'num_shuffled_files': 3,
 }
 
 

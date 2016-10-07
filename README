@@ -58,12 +58,48 @@ trans_norm_train.py
     you to change these values in the VARS dictionary in 'utilities.py'.
 
     Depending on whether the commandline option '--test' was supplied, the model
-    is either trained or used for prediction on test set. The test set prediction
-    is on a per word basis including words in the vocabulary. So it should not
-    be a surprise that it is a high value. If you want to check the actual
-    performance of the system for Normalization, you should run the scripts
-    'tf_normalize_skel' and 'tf_normalize_merge' as explained earlier.
+    is either trained or used for prediction on test set. The test set
+    prediction is on a per word basis including words in the vocabulary. So it
+    should not be a surprise that it is a high value. If you want to check the
+    actual performance of the system for Normalization, you should run the
+    scripts 'tf_normalize_skel' and 'tf_normalize_merge' as explained earlier.
 
     The option '--test' is used to indicate that the model should use the
     provided test files and run prediction on them. So you can replace the files
     with development set files too.
+
+tf_normalize_skel.py
+    This script, as mentioned earlier, should be used to run the trained model
+    on the test set, or any set for that matter. There is a single filter used
+    in this script which checks if an input token is in th vocabulary or not.
+    If the token is in the voacabulary, then it will leave the token. Otherwise,
+    the token will be passed to the model.
+
+    This script stores the output of the prediction as a json file. Along with
+    the predictions, the script also stores flags indicating whether a word was
+    passed to the model or not. The list of flags gets update later in the
+    pipeline when running the next script.
+
+    The purpose of the flags is to help with debugging. This way, you can load
+    the json and ask different questions such as : 'what words were ignored/in
+    vocab/predicted by the pipeline' or 'of all the words that were predicted by
+    the model, how many were correctly predicted' etc. In such cases, the flag
+    value can be used to filter the results.
+
+tf_normalize_merge.py
+    This is the final script that should be run after the skeleton script
+    (tf_normalize_skel).  This combines the deep learning prediction with rule
+    baed prediction. It utilizes the rules defined in 'dict/sub.dict' and others
+    (please check the script for all the other sources) to decide whether the
+    deep learning prediction should be considered or one of the rules is
+    applied.  The flag for that token is appropriately changed.
+
+    It also does one extra step of diff. This is not required for prediction but
+    can help with error analysis. In this step, the current output of the system
+    is compared with the previous run of this script. So, apart from the
+    performance, this script also outputs the number of changes in the
+    prediciton on the same set. It also creates a file './data/diff_errors.txt'
+    with all the changes so you can go through these. I had used it while tuning
+    (adding/removing) rules with the performance on the development set. Please
+    refer to the function 'perform_diff()' in './diff_errors.py' for more
+    details.

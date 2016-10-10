@@ -1,11 +1,17 @@
+import os
 import numpy as np
 import tensorflow as tf
 from collections import namedtuple
 from eval import evaluate
-from trans_norm import create_model, _buckets
-from data_utils import context_window, convert_format, valid_token, \
-    build_aspell, sentence_to_token_ids, initialize_vocabulary, EOS_ID
-from utilities import loadJSON, saveJSON
+from trans_norm_model import TransNormModel
+from dataUtils import DataSource
+from utilities import loadJSON, saveJSON, PATHS, VARS
+
+tf.app.flags.DEFINE_integer("gpu", 0,
+                            "Index of the GPU to be used for creating the "
+                            "graph of the model")
+
+FLAGS = tf.app.flags.FLAGS
 
 
 def cleanupToken(token, rep_allowed=1):
@@ -89,44 +95,70 @@ def postPred(word, aspell):
     return word
 
 
-def normalize(samples):
-    ngram = 3
+def normalize(samples, gpu_device):
+    ngram = VARS['ngram']
     sep = ' _S_ '
-    sources = build_sources()
-    aspell = build_aspell()
+    batch_size = 1
+    forward_only = predict = True
 
-    # Load seq2seq model
-    sess = tf.Session()
-    model = create_model(sess, True)
-    model.batch_size = 1
-    en_vocab, _ = initialize_vocabulary('./data/vocab.en')
-    _, rev_fr_vocab = initialize_vocabulary('./data/vocab.fr')
+    dsource = DataSource(reuse=True)
+    aspell = dsource.aspell
+    vocab, rev_vocab = DataSource.initialize_vocabulary(dsource.vocab_path)
+    eos_idx = vocab['_EOS']
+
+    inp_seq_batch = tf.placeholder(tf.int64, shape=[batch_size, None])
+    out_seq_batch = tf.placeholder(tf.int64, shape=[batch_size, None])
+    targets_batch = tf.placeholder(tf.int64, shape=[batch_size, None])
+    model_dir = os.path.join(PATHS['root'] + 'train/')
+    with tf.device(gpu_device):
+        model = TransNormModel(
+            inp_seq_batch,
+            out_seq_batch,
+            targets_batch,
+            dsource.vocab_size,
+            batch_size,
+            cell_size=VARS['cell_size'],
+            num_layers=VARS['num_layers'],
+            max_gradient_norm=VARS['max_gradient_norm'],
+            learning_rate=VARS['learning_rate'],
+            learning_rate_decay_factor=VARS['learning_rate_decay_factor'],
+            forward_only=forward_only,
+            predict=predict,
+            model_dir=model_dir,
+            eos_idx=eos_idx,
+        )
+    sess = tf.Session(config=model.sess_conf)
+    model.load_model(sess, None, model.model_dir)
 
     def predict_word(in_win):
-        token_ids = sentence_to_token_ids(sep.join(convert_format(win)),
-                                          en_vocab)
-        bucket_id = min([b for b in xrange(len(_buckets))
-                         if _buckets[b][0] > len(token_ids)])
-        encoder_inputs, decoder_inputs, target_weights = model.get_batch(
-            {bucket_id: [(token_ids, [])]}, bucket_id)
-        _, _, output_logits = model.step(sess, encoder_inputs, decoder_inputs,
-                                         target_weights, bucket_id, True)
-        outputs = [int(np.argmax(logit, axis=1)) for logit in output_logits]
-        if EOS_ID in outputs:
-            outputs = outputs[:outputs.index(EOS_ID)]
-        out_token = ''.join([rev_fr_vocab[out] for out in outputs])
+        token_ids = DataSource.sentence_to_token_ids(
+            sep.join(DataSource.convert_format(win)),
+            vocab
+        )
+        trigger = [vocab['_GO']]
+        dummy_target = [vocab['_GO']]
+        outputs = sess.run(model.predicted_word,
+                           feed_dict={
+                               inp_seq_batch.name: [token_ids],
+                               out_seq_batch.name: [trigger],
+                               targets_batch.name: [dummy_target]
+                           })[1].reshape((-1))
+        if eos_idx in outputs:
+            outputs = outputs[:np.where(outputs == eos_idx)[0][0]]
+        out_token = ''.join([rev_vocab[out] for out in outputs])
         return out_token.replace('_', ' ')
 
+    sources = build_sources()
     count = 0
     total, ignored, ruled, predicted = (0, 0, 0, 0)
     print 'total no. of samples : ', len(samples)
     for sample in samples:
         sample['prediction'] = []
         sample['flags'] = []
-        for win in context_window(sample['input'], ngram):
+        for win in DataSource.context_window(sample['input'], ngram):
             total += 1
             token = win[ngram // 2].lower()
-            if not valid_token(token):
+            if not DataSource.valid_token(token):
                 sample['prediction'].append(token)
                 sample['flags'].append('ignored')
                 ignored += 1
@@ -167,8 +199,17 @@ def normalize(samples):
     )
 
 
-if __name__ == '__main__':
+def main(_):
+    if FLAGS.gpu < 0 or FLAGS.gpu > VARS['num_gpus'] - 1:
+        raise ValueError("The index of the GPU should be between 0 and "
+                         "{}".format(VARS['num_gpus'] - 1))
+    else:
+        gpu_device = '/gpu:{}'.format(FLAGS.gpu)
     samples = loadJSON('./data/test_truth.json')
-    normalize(samples)
+    normalize(samples, gpu_device)
     saveJSON(samples, './data/test_out.json')
     evaluate(samples)
+
+
+if __name__ == '__main__':
+    tf.app.run()

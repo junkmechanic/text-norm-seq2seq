@@ -13,17 +13,25 @@ data/
     test_truth.json                     -- benchmark test data
     clear_tweets.json                   -- tweets with no OOVs
 trans_norm_train.py
-# tf_normalize.py
-tf_normalize_merge.py
+tf_normalize.py
 tf_normalize_skel.py
+tf_normalize_merge.py
 
-The main script to train the mold is './trans_norm_model.py'. If you supply it
+The main script to train the model is './trans_norm_model.py'. If you supply it
 with the command line flag '--test' then it will run the model on the test set.
 
-The script './tf_normalize_skel.py' is used to run the model on the test set and
-create an output file that would be used by 'tf_normalize_merge.py'. The suffix
-'skel' stands for skeleton because it does not run the entire normalization
-system but only the prediction part where the deep learning model is used.
+The other important script is './tf_normalize.py' which uses the trained model
+as well as all the rules to run the entire normalization pipeline.
+
+If you want to analyze the system and particularly see how the deep learning
+model performs by itself, then you should run './tf_normalize_skel.py' which
+does not use the rules.
+
+The script './tf_normalize_skel.py' is used to run only the model (no rules) on
+the test set and create an output file that would be used by
+'tf_normalize_merge.py'. The suffix 'skel' stands for skeleton because it does
+not run the entire normalization system but only the prediction part where the
+deep learning model is used.
 
 The script './tf_normalize_merge.py' then uses the output of the skeleton script
 to merge it with the rule based modules.
@@ -74,6 +82,25 @@ trans_norm_train.py
     tend to take up the entire memory on a single GPU, specially if the model
     has a large number of parameters.
 
+tf_normalize.py
+    This script can be used to run the trained model on test set (or development
+    set). This will run the entire pipeline for normalization.
+
+    This script stores the output of the prediction as a json file in the
+    following location : './data/test_out.json'. Along with the predictions, the
+    script also stores flags indicating whether a token was passed to the model
+    or if one of the rules was applied to the token.
+
+    The purpose of the flags is to help with debugging. This way, you can parse
+    the json and ask different questions such as : 'what words were ignored/in
+    vocab/predicted by the pipeline' or 'of all the words that were predicted by
+    the model, how many were correctly predicted' etc. In such cases, the flag
+    value can be used to filter the results.
+
+    The option '--gpu' can be used to specify which GPU should be used to load
+    the model's graph onto. This can be helpful when you want to train model(s)
+    on a GPU(s) and test the performance of another on a different GPU.
+
 tf_normalize_skel.py
     This script, as mentioned earlier, should be used to run the trained model
     on the test set, or any set for that matter. There is a single filter used
@@ -82,7 +109,7 @@ tf_normalize_skel.py
     the token will be passed to the model.
 
     This script stores the output of the prediction as a json file. Along with
-    the predictions, the script also stores flags indicating whether a word was
+    the predictions, the script also stores flags indicating whether a token was
     passed to the model or not. The list of flags gets update later in the
     pipeline when running the next script.
 

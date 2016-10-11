@@ -53,6 +53,15 @@ full name of the root of this library.
 Following is some information on individual scripts:
 
 trans_norm_train.py
+    Input files:
+        ./data/clear_tweets.json   [global variable 'train_files']
+        ./data/train_data.json     [global variable 'train_files']
+        ./data/test_truth.json     [global variable 'test_files']
+    Output files:
+        ./train/checkpoint
+        ./train/transNormModel_mixed_3L_1024U.ckpt-xxx
+        ./train/transNormModel_mixed_3L_1024U.ckpt-xxx.meta
+
     This script trains the sequence to sequence model for normalization. The
     first thing it does is preprocess the data from the train and test files to
     convert it into a binary format which is easier to feed to TensorFlow. You
@@ -83,6 +92,11 @@ trans_norm_train.py
     has a large number of parameters.
 
 tf_normalize.py
+    Input files:
+        ./data/test_truth.json     [commandline argument 'test_file']
+    Output files:
+        ./data/test_out.json       [commandline argument 'out_file']
+
     This script can be used to run the trained model on test set (or development
     set). This will run the entire pipeline for normalization.
 
@@ -102,6 +116,11 @@ tf_normalize.py
     on a GPU(s) and test the performance of another on a different GPU.
 
 tf_normalize_skel.py
+    Input files:
+        ./data/test_truth.json         [specified in loadJSON call in main()]
+    Output files:
+        ./data/test_out_only_oov.json  [specified in saveJSON call in main()]
+
     This script, as mentioned earlier, should be used to run the trained model
     on the test set, or any set for that matter. There is a single filter used
     in this script which checks if an input token is in th vocabulary or not.
@@ -124,6 +143,15 @@ tf_normalize_skel.py
     on a GPU(s) and test the performance of another on a different GPU.
 
 tf_normalize_merge.py
+    Input files:
+        ./data/test_truth.json         [specified in loadJSON call in main()]
+        ./data/test_out_only_oov.json  [specified in loadJSON call for global
+                                        variable 'pred_cache'. This should be
+                                        the same file as the ouptut of
+                                        'tf_normalize_skel.py']
+    Output files:
+        ./data/test_out.json           [specified in saveJSON call in __main__]
+
     This is the final script that should be run after the skeleton script
     (tf_normalize_skel).  This combines the deep learning prediction with rule
     baed prediction. It utilizes the rules defined in 'dict/sub.dict' and others

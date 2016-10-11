@@ -10,6 +10,10 @@ from utilities import loadJSON, saveJSON, PATHS, VARS
 tf.app.flags.DEFINE_integer("gpu", 0,
                             "Index of the GPU to be used for creating the "
                             "graph of the model")
+tf.app.flags.DEFINE_string("test_file", './data/test_truth.json',
+                           "A json file used as input for normalization")
+tf.app.flags.DEFINE_string("out_file", './data/test_out.json',
+                           "A json file to store the output of normalization")
 
 FLAGS = tf.app.flags.FLAGS
 
@@ -205,9 +209,9 @@ def main(_):
                          "{}".format(VARS['num_gpus'] - 1))
     else:
         gpu_device = '/gpu:{}'.format(FLAGS.gpu)
-    samples = loadJSON('./data/test_truth.json')
+    samples = loadJSON(FLAGS.test_file)
     normalize(samples, gpu_device)
-    saveJSON(samples, './data/test_out.json')
+    saveJSON(samples, FLAGS.out_file)
     evaluate(samples)
 
 
